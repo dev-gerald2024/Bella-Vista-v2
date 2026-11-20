@@ -1,0 +1,38 @@
+# Bella Vista Oasis Spa - Apache rules (XAMPP: htdocs allows .htaccess by default)
+Options -Indexes
+DirectoryIndex index.html
+AddDefaultCharset UTF-8
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # never serve PHP libraries, database scripts, the data folder, docs, backups, old Node files or dotfiles
+  RewriteRule ^(php|data|database|docs|archive|server|_backup|node_modules)(/|$) - [R=404,L]
+  RewriteRule \.(sql|md|env|db|log|bat|lock)$ - [R=404,L]
+  RewriteRule (^|/)package(-lock)?\.json$ - [R=404,L]
+  RewriteRule \.backup\.html$ - [R=404,L]
+  RewriteRule (^|/)\. - [R=404,L]
+
+  # every /api/... call is handled by api/index.php (the route is passed as ?__path=)
+  RewriteRule ^api/index\.php$ - [L]
+  RewriteRule ^api/?(.*)$ api/index.php?__path=$1 [QSA,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "DENY"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-qOhFsq0QMV2REqNwk5hGH5bZE9SkX6gt6yeyKdYPv+U='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; frame-src https://www.google.com 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' mailto:; object-src 'none'"
+  Header always set Strict-Transport-Security "max-age=15552000; includeSubDomains" "expr=%{HTTPS} == 'on'"
+</IfModule>
+
+# Prevent aggressive browser caching of scripts, styles and html during local development
+<FilesMatch "\.(html|htm|js|css|json)$">
+  FileETag None
+  <IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </IfModule>
+</FilesMatch>

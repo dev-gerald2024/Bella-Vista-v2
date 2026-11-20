@@ -1,0 +1,385 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Bella Vista Oasis Spa | Contact &amp; Reservations</title>
+    <meta
+      name="description"
+      content="Contact Bella Vista Oasis Spa and send an appointment inquiry. The spa will reply to confirm availability."
+    />
+    <link rel="canonical" href="contact.html" />
+    <meta property="og:title" content="Bella Vista Oasis Spa | Contact &amp; Reservations" />
+    <meta
+      property="og:description"
+      content="Contact Bella Vista Oasis Spa and send an appointment inquiry. The spa will reply to confirm availability."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="assets/logo/logo.png" type="image/png" />
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css?v=20261113_refundtiming" />
+  </head>
+  <body data-page="contact">
+    <main id="main">
+      <section class="pb">
+        <div class="pbg" role="presentation"></div>
+        <div class="wrap">
+          <span class="eb">Begin your escape</span>
+          <h1 class="pt">Contact &amp; Reservations</h1>
+          <p class="psub">Tell us how we can make your visit memorable.</p>
+        </div>
+      </section>
+      <section class="cr" id="contact">
+        <div class="wrap">
+          <div class="contact two">
+            <div class="reveal">
+              <span class="eb">Contact information</span>
+              <ul class="info" id="info"></ul>
+              <div class="panel hrs">
+                <span class="eb">Operating hours</span>
+                <ul class="info" id="hours"></ul>
+              </div>
+              <a class="btn line" id="fb" target="_blank" rel="noopener">Visit our Facebook page</a>
+            </div>
+            <div class="reveal">
+              <span class="eb">Location</span>
+              <div id="map"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="booking">
+        <div class="wrap">
+          <div class="intro reveal" style="margin-bottom: clamp(32px, 5vw, 56px)">
+            <span class="eb">Reservations</span>
+            <h2>Request an appointment</h2>
+          </div>
+          <div class="gate reveal" id="bookgate" hidden>
+            <h3>Reserve Your Experience</h3>
+            <p>
+              An account is required to make a reservation. Please sign in or create a Bella Vista Oasis Spa account to
+              continue.
+            </p>
+            <div class="hb">
+              <a class="btn" href="login.html?next=contact.html%23booking">Login</a>
+              <a class="btn line" href="register.html?next=contact.html%23booking">Create account</a>
+            </div>
+          </div>
+          <form id="form" novalidate class="reveal" style="max-width: 760px; margin: 0 auto" hidden>
+            <div
+              style="
+                background: #f4f6f3;
+                border-left: 4px solid var(--forest);
+                padding: 14px 18px;
+                margin: 0 0 24px;
+                border-radius: 2px;
+                font-size: 0.9rem;
+                color: #2c3a2e;
+                line-height: 1.5;
+              "
+            >
+              <strong>Operating Hours:</strong>
+              Daily, 1:00 PM â€“ 9:00 PM (Asia/Manila).
+              <br />
+              <strong>Sanitization:</strong>
+              A 30-minute cleaning and sanitization buffer follows every session. Both treatment and cleaning must
+              conclude by 9:00 PM.
+              <br />
+              <strong>Cancellation Policy:</strong>
+              Rescheduling and cancellations must be made at least
+              <strong>24 hours</strong>
+              prior to your appointment time.
+            </div>
+
+            <!-- SECTION A: Customer Information -->
+            <div class="b-sec" id="sec-customer">
+              <div class="sec-head">
+                <span class="sec-badge">A</span>
+                <h4>Customer Information</h4>
+              </div>
+              <p class="who" id="who" style="margin: 4px 0 14px; color: var(--mut); font-size: 0.92rem"></p>
+              <div class="f">
+                <label for="phone">Phone number</label>
+                <input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  autocomplete="tel"
+                  placeholder="09XX XXX XXXX"
+                  maxlength="13"
+                  required
+                />
+                <div class="err">Phone number must contain 11 digits (09…) or 12 digits (639…).</div>
+              </div>
+            </div>
+
+            <!-- SECTION B: Treatment Details -->
+            <div class="b-sec" id="sec-treatment">
+              <div class="sec-head">
+                <span class="sec-badge">B</span>
+                <h4>Treatment Details</h4>
+              </div>
+              <div class="row">
+                <div class="f">
+                  <label for="interest">Select Treatment</label>
+                  <select id="interest" name="interest" required></select>
+                  <div class="err">Please choose a treatment.</div>
+                </div>
+                <div class="f">
+                  <label for="duration">Treatment Duration</label>
+                  <select id="duration" name="duration" required>
+                    <option value="">Choose a treatment first</option>
+                  </select>
+                  <div class="err">Please select a duration.</div>
+                </div>
+              </div>
+              <div class="f" style="margin-top: 14px">
+                <label for="guests">Number of Guests (1â€“6)</label>
+                <input id="guests" name="guests" type="number" min="1" max="6" value="1" required />
+                <div class="err">Guest count must be between 1 and 6.</div>
+              </div>
+            </div>
+
+            <!-- SECTION C: Room Recommendation -->
+            <div class="b-sec" id="sec-room">
+              <div class="sec-head">
+                <span class="sec-badge">C</span>
+                <h4>Room Recommendation</h4>
+              </div>
+              <p style="font-size: 0.86rem; color: var(--mut); margin: 0 0 14px">
+                Our dynamic recommendation engine selects the ideal suite based on your chosen treatment, duration,
+                guest count, and real-time availability:
+              </p>
+
+              <!-- Featured Recommended Room Card -->
+              <div id="roomRecBox" class="room-rec-card">
+                <div class="room-rec-badge">Recommended Suite</div>
+                <div class="room-rec-content">
+                  <div class="room-rec-top">
+                    <h4 id="recRoomName" class="room-title">Executive Room 1 (SR-1)</h4>
+                    <span id="recRoomStatus" class="room-status-pill available">Available</span>
+                  </div>
+                  <p id="recRoomDesc" class="room-desc">
+                    Private single treatment room with en-suite shower, ambient lighting, and therapeutic massage bed.
+                  </p>
+                  <div class="room-specs">
+                    <span class="spec-item">
+                      <strong>Max Capacity:</strong>
+                      <span id="recRoomCap">1 Guest</span>
+                    </span>
+                    <span class="spec-item">
+                      <strong>Applicable Rate:</strong>
+                      <span id="recRoomRate">Included with treatment</span>
+                    </span>
+                  </div>
+                  <div class="room-reason-box">
+                    <strong>Why this suite?</strong>
+                    <p id="recRoomReason" style="margin: 4px 0 0; font-size: 0.85rem">
+                      Recommended for solo relaxation with private therapy bed, en-suite shower, and calming ambient
+                      lighting.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Alternative Eligible Rooms -->
+              <div id="altRoomsSection" style="margin-top: 16px; display: none">
+                <h5 style="font-size: 0.92rem; font-weight: 600; color: var(--forest); margin: 0 0 10px">
+                  Other Eligible Suites:
+                </h5>
+                <div id="altRoomsList" class="alt-rooms-list"></div>
+              </div>
+
+              <!-- Hidden field for active selected room code -->
+              <input type="hidden" id="selectedRoomCode" name="selectedRoomCode" value="SR-1" />
+              <input type="hidden" id="selectedRoomId" name="selectedRoomId" value="1" />
+            </div>
+
+            <!-- SECTION D: Appointment Schedule -->
+            <div class="b-sec" id="sec-schedule">
+              <div class="sec-head">
+                <span class="sec-badge">D</span>
+                <h4>Appointment Schedule</h4>
+              </div>
+              <div class="row">
+                <div class="f">
+                  <label for="date">Preferred date</label>
+                  <input id="date" name="date" type="date" required />
+                  <div class="err">Choose a date from today onward.</div>
+                </div>
+                <div class="f">
+                  <label for="time">Available time slots</label>
+                  <select id="time" name="time" required>
+                    <option value="">Choose date and treatment first</option>
+                  </select>
+                  <div class="err">Choose an available time.</div>
+                </div>
+              </div>
+              <p class="note" id="slotHint" style="margin: 8px 0 0; font-size: 0.85rem; color: var(--forest)"></p>
+            </div>
+
+            <!-- SECTION E: Health Declaration & Consent -->
+            <div class="b-sec health-card" id="sec-health">
+              <div class="sec-head">
+                <span class="sec-badge">E</span>
+                <h4>Health Declaration &amp; Consent</h4>
+              </div>
+              <p style="font-size: 0.84rem; color: #555; margin: 0 0 12px; line-height: 1.45">
+                To ensure your well-being, please declare any relevant health conditions, allergies, injuries, cardiac
+                conditions, or pregnancy (T&amp;C 03, 17, 20).
+              </p>
+              <div class="f" style="margin-bottom: 12px">
+                <label for="msg" style="font-size: 0.85rem">Health conditions, allergies, or special notes</label>
+                <textarea
+                  id="msg"
+                  name="msg"
+                  rows="2"
+                  placeholder="State 'None' or describe any allergies, skin sensitivities, or health concerns..."
+                ></textarea>
+              </div>
+              <div class="f" style="margin-bottom: 0">
+                <label
+                  style="
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    font-size: 0.85rem;
+                    color: #2c3a2e;
+                    cursor: pointer;
+                    line-height: 1.4;
+                  "
+                >
+                  <input
+                    id="agreeHealth"
+                    name="agreeHealth"
+                    type="checkbox"
+                    required
+                    style="margin-top: 2px; width: 18px; height: 18px; accent-color: var(--forest)"
+                  />
+                  <span>
+                    <b>I confirm my health declaration is accurate and complete</b>
+                    , and I give consent to undergo the selected spa therapy. (BR-13, T&amp;C 17, 20)
+                  </span>
+                </label>
+                <div class="err" id="errHealth">Please confirm your health declaration before submitting.</div>
+              </div>
+            </div>
+
+            <!-- SECTION F: Appointment Summary -->
+            <div class="b-sec" id="sec-summary">
+              <div class="sec-head">
+                <span class="sec-badge">F</span>
+                <h4>Appointment Summary</h4>
+              </div>
+              <div id="priceSummaryBox" class="summary-box">
+                <div class="sum-grid">
+                  <div class="sum-item">
+                    <span class="sum-k">Treatment:</span>
+                    <strong id="sumService">â€”</strong>
+                  </div>
+                  <div class="sum-item">
+                    <span class="sum-k">Duration:</span>
+                    <strong id="sumDuration">â€”</strong>
+                  </div>
+                  <div class="sum-item">
+                    <span class="sum-k">Guests:</span>
+                    <strong id="sumGuests">1 Guest</strong>
+                  </div>
+                  <div class="sum-item">
+                    <span class="sum-k">Assigned Suite:</span>
+                    <strong id="sumRoom">Executive Room 1 (SR-1)</strong>
+                  </div>
+                  <div class="sum-item" style="grid-column: 1/-1">
+                    <span class="sum-k">Date &amp; Time:</span>
+                    <strong id="sumSchedule">Choose date &amp; time</strong>
+                  </div>
+                </div>
+                <div class="sum-total-wrap">
+                  <span style="color: #2c3a2e; font-weight: 600">Official Service Rate:</span>
+                  <span id="priceDisplay" style="font-size: 1.3rem; font-weight: 700; color: var(--forest)">
+                    â‚±0.00
+                  </span>
+                </div>
+                <div id="priceBreakdown" style="font-size: 0.82rem; color: #556b59; margin-top: 4px"></div>
+              </div>
+            </div>
+
+            <!-- SECTION G: Final Confirmation -->
+            <div class="b-sec" id="sec-confirm">
+              <div class="sec-head">
+                <span class="sec-badge">G</span>
+                <h4>Final Confirmation</h4>
+              </div>
+              <div class="f" style="margin: 10px 0 20px">
+                <label
+                  style="
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    font-size: 0.85rem;
+                    color: #2c3a2e;
+                    cursor: pointer;
+                    line-height: 1.4;
+                  "
+                >
+                  <input
+                    id="agreeTerms"
+                    name="agreeTerms"
+                    type="checkbox"
+                    required
+                    style="margin-top: 2px; width: 18px; height: 18px; accent-color: var(--forest)"
+                  />
+                  <span>
+                    I have reviewed and agree to the
+                    <a
+                      href="#"
+                      data-doc="Terms and Conditions"
+                      style="color: var(--forest); font-weight: 600; text-decoration: underline"
+                    >
+                      Bella Vista Oasis Spa Terms and Conditions
+                    </a>
+                    , including the 15-minute arrival grace period and 24-hour cancellation downpayment policy. (BR-12,
+                    T&amp;C 01, 02)
+                  </span>
+                </label>
+                <div class="err" id="errTerms">You must accept the Terms and Conditions to proceed.</div>
+              </div>
+
+              <button class="btn" type="submit" id="send" style="width: 100%; font-size: 0.9rem; padding: 14px 24px">
+                Request Appointment
+              </button>
+              <div class="status" id="status" role="status" aria-live="polite"></div>
+            </div>
+          </form>
+        </div>
+      </section>
+      <section class="cta dk" id="reserve">
+        <div class="wrap reveal">
+          <h2>
+            Make Space
+            <br />
+            for Yourself.
+          </h2>
+          <p>Your next moment of calm begins at Bella Vista Oasis Spa.</p>
+          <div class="hb">
+            <a class="btn" href="#booking">Book an appointment</a>
+            <a class="btn ghost" href="faqs.html">Read our FAQs</a>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="js/data.js?v=20261113_refundtiming"></script>
+    <script src="js/notify.js?v=20261113_refundtiming"></script>
+    <script src="js/auth.js?v=20261113_refundtiming"></script>
+    <script src="js/booking.js?v=20261113_refundtiming"></script>
+    <script src="js/main.js?v=20261113_refundtiming"></script>
+  </body>
+</html>

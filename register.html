@@ -1,0 +1,64 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Bella Vista Oasis Spa | Create Account</title>
+    <meta name="description" content="Create a Bella Vista Oasis Spa account to reserve an appointment." />
+    <link rel="canonical" href="register.html" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="assets/logo/logo.png" type="image/png" />
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css?v=20261113_refundtiming" />
+  </head>
+  <body data-page="register">
+    <main id="main">
+      <section class="auth" data-auth>
+        <div class="authbg" role="presentation"></div>
+        <div class="acard">
+          <img class="alogo" src="assets/logo/logo.png" width="72" height="72" alt="Bella Vista Oasis Spa" />
+          <h1>Create Your Account</h1>
+          <p class="asub">An account is required to make a reservation.</p>
+          <form id="registerForm" novalidate>
+            <div class="f" data-f="fullName">
+              <label for="fullName">Full name</label>
+              <input id="fullName" name="fullName" autocomplete="name" required maxlength="100" />
+              <div class="err">Please enter your full name.</div>
+            </div>
+            <div class="f" data-f="email">
+              <label for="email">Gmail address</label>
+              <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required />
+              <div class="err">Please enter a valid Gmail address.</div>
+            </div>
+            <div data-pw="password" data-label="Password" data-ac="new-password" data-meter></div>
+            <div data-pw="confirmPassword" data-label="Confirm password" data-ac="new-password"></div>
+            <button class="btn" type="submit" id="go">Create account</button>
+          </form>
+          <div id="regDone" hidden class="aok">
+            <b>Check your inbox.</b>
+            We sent a verification link to your Gmail address. Verify it, then log in to make a reservation.
+          </div>
+          <div class="alinks">
+            <span>
+              Already have an account?
+              <a href="login.html" data-to-login>Login</a>
+            </span>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="js/data.js?v=20261113_refundtiming"></script>
+    <script src="js/notify.js?v=20261113_refundtiming"></script>
+    <script src="js/auth.js?v=20261113_refundtiming"></script>
+    <script src="js/booking.js?v=20261113_refundtiming"></script>
+    <script src="js/main.js?v=20261113_refundtiming"></script>
+  </body>
+</html>

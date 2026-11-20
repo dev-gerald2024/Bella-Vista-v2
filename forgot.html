@@ -1,0 +1,56 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Bella Vista Oasis Spa | Forgot Password</title>
+    <meta name="description" content="Request a secure link to reset your Bella Vista Oasis Spa password." />
+    <link rel="canonical" href="forgot.html" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="assets/logo/logo.png" type="image/png" />
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css?v=20261113_refundtiming" />
+  </head>
+  <body data-page="forgot">
+    <main id="main">
+      <section class="auth" data-auth>
+        <div class="authbg" role="presentation"></div>
+        <div class="acard">
+          <img class="alogo" src="assets/logo/logo.png" width="72" height="72" alt="Bella Vista Oasis Spa" />
+          <h1>Reset Password</h1>
+          <p class="asub">Enter your Gmail address and choose your new password.</p>
+          <form id="forgotForm" novalidate>
+            <div class="f" data-f="email">
+              <label for="email">Gmail address</label>
+              <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required />
+              <div class="err">Please enter a valid Gmail address.</div>
+            </div>
+            <div data-pw="password" data-label="New password" data-ac="new-password" data-meter></div>
+            <div data-pw="confirmPassword" data-label="Confirm new password" data-ac="new-password"></div>
+            <button class="btn" type="submit" id="go">Reset Password</button>
+          </form>
+          <div id="forgotDone" hidden class="aok">
+            <b>Password updated successfully.</b>
+            You can now
+            <a href="login.html" style="text-decoration: underline; font-weight: 600">Login</a>
+            with your new password.
+          </div>
+          <div class="alinks"><a href="login.html">Back to login</a></div>
+        </div>
+      </section>
+    </main>
+    <script src="js/data.js?v=20261113_refundtiming"></script>
+    <script src="js/notify.js?v=20261113_refundtiming"></script>
+    <script src="js/auth.js?v=20261113_refundtiming"></script>
+    <script src="js/booking.js?v=20261113_refundtiming"></script>
+    <script src="js/main.js?v=20261113_refundtiming"></script>
+  </body>
+</html>
