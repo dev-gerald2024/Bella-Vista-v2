@@ -186,7 +186,7 @@ function pager(k,total,a,n,pages){const st=gst(k),nums=[];
 const STATUS_OPT=[["","All statuses"],["Pending","Pending"],["Confirmed","Confirmed"],["In_progress","In Progress"],["Completed","Completed"],["Cancelled","Cancelled"],["No-show","No-show"],["Rejected","Rejected"]];
 function list(k,flt){const s=SC[k],all=ld(k),rows=all.filter(flt||(()=>1)),bkg=k==="bookings",td=day(new Date());
  const hint=bkg?"":(k==="services"||k==="rooms")?`<p class="demo">Items you add here appear on the public site${k==="services"?" and in the booking list":""}. An item with the same name as a built-in one replaces its text. Built-in items cannot be removed from here.</p>`:`<p class="demo">${esc(HINT[k]||"")}</p>`;
- const items=rows.map(r=>({h:`<tr>${vis(k).map(f=>`<td>${cell(r,f)}</td>`).join("")}<td class="a">${bkg?bact(r):""}<button class="btn s" data-a="edit" data-k="${k}" data-i="${r.id}">Edit</button><button class="btn s d" data-a="del" data-k="${k}" data-i="${r.id}">${bkg?"Archive":"Delete"}</button></td></tr>`,
+ const items=rows.map(r=>({h:`<tr>${vis(k).map(f=>`<td>${cell(r,f)}</td>`).join("")}<td class="a">${bkg?bact(r):`<button class="btn s" data-a="edit" data-k="${k}" data-i="${r.id}">Edit</button>`}<button class="btn s d" data-a="del" data-k="${k}" data-i="${r.id}">${bkg?"Archive":"Delete"}</button></td></tr>`,
   s:flat(r),f:{status:r.status,when:bkg?(r.date===td?"today":r.date>td?"upcoming":"past"):"",category:r.category||""}}));
  const cats=[...new Set(rows.map(r=>r.category).filter(Boolean))].sort(),fl=bkg?[{k:"status",t:"Status",o:k==="bookings"&&flt?[["","All"]]:STATUS_OPT},{k:"when",t:"Date",o:[["","All dates"],["today","Today"],["upcoming","Upcoming"],["past","Past"]]}]:cats.length?[{k:"category",t:"Category",o:[["","All categories"]].concat(cats.map(c=>[c,c]))}]:[];
  if(bkg&&flt)fl.shift();   /* the Pending list is already one status */
@@ -873,7 +873,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
     cancelLabel:"Cancel"
    });
    if(!ok)return;
-  }else if(v==="In_progress"){
+  }else if(v==="In_progress"){if(!item.therapistName&&!item.therapistId){Notice.warning("Therapist Required","No therapist has been assigned to this booking yet. Please assign a therapist before starting the treatment.");return}if(!["PAID","PARTIALLY_PAID"].includes(String(item.paymentStatus||"UNPAID").toUpperCase())){Notice.warning("Payment Required","This booking is UNPAID. Treatment can only start once it is partially paid or paid.");return}
    const ok=await Notice.confirm({
     title:"Start Treatment?",
     message:"Mark this appointment as In Progress? The customer has arrived and treatment has begun.",
@@ -888,7 +888,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
     cancelLabel:"Cancel"
    });
    if(!ok)return;
-  }else if(v==="Completed"){
+  }else if(v==="Completed"){if(!["PAID","PARTIALLY_PAID","REFUNDED"].includes(String(item.paymentStatus||"UNPAID").toUpperCase())){Notice.warning("Payment Required","This booking is UNPAID. The customer must make at least a partial payment before the appointment can be completed.");return}{const t=String(item.time||"").slice(0,5),at=new Date(item.date+"T"+(t||"23:59")+":00");if(!isNaN(at)&&at>new Date()){Notice.warning("Too Early to Complete","This appointment is scheduled for "+when(item.date)+" at "+(item.time||"")+". It can only be marked as Completed once that time has arrived.");return}}
    const ok=await Notice.confirm({
     title:"Complete Appointment?",
     message:"Mark this appointment as Completed? This finishes the session and logs the mandatory 30-minute cleaning buffer.",
@@ -920,10 +920,14 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
     Date: <b>${when(item.date)}</b> at <b>${esc(item.time)}</b> (Cleaning buffer ends: <b>${esc(item.cleaningEnd||"—")}</b>)</p>
     <div class="f">
       <label for="asgn_r">Assign Room</label>
-      <select id="asgn_r">
-        <option value="">-- Keep Current (${esc(item.roomName||"None")}) --</option>
-        ${rooms.map(r=>`<option value="${r.id}"${(item.roomName&&(item.roomName===r.room_name||item.roomName===r.room_code))?" selected":""}>${esc(r.room_code)} — ${esc(r.room_name)} (${esc(r.category_name||r.category_code)}, max ${r.max_capacity} guests)</option>`).join("")}
-      </select>
+      ${(()=>{
+         const cur=(item.roomName||item.roomId)?rooms.find(r=>item.roomName===r.room_name||item.roomName===r.room_code||String(item.roomId||"")===r.room_code):null;
+         if(item.roomName||item.roomId){
+           const label=cur?`${esc(cur.room_code)} — ${esc(cur.room_name)} (${esc(cur.category_name||cur.category_code)}, max ${cur.max_capacity} guests)`:esc(item.roomName||item.roomId);
+           return `<select id="asgn_r" disabled title="Room was selected by the customer and cannot be changed"><option value="">${label}</option></select><small>Room is fixed to the customer's booking.</small>`;
+         }
+         return `<select id="asgn_r"><option value="">-- Select Room --</option>${rooms.map(r=>`<option value="${r.id}">${esc(r.room_code)} — ${esc(r.room_name)} (${esc(r.category_name||r.category_code)}, max ${r.max_capacity} guests)</option>`).join("")}</select>`;
+       })()}
     </div>
     <div class="f">
       <label for="asgn_t">Assign Therapist</label>

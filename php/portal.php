@@ -697,7 +697,7 @@ function admin_save_booking(array $b): void {
 
     // Status transition validation
     if ($d['status'] !== $old['status']) {
-      $stErr = validate_status_transition($old['status'], $d['status'], true, $d['date'], $d['time']);
+      $stErr = validate_status_transition($old['status'], $d['status'], true, $d['date'], $d['time'], $old['payment_status'] ?? null, $old['therapist_id'] ?? null);
       if ($stErr) fail($stErr, 400);
     }
 
@@ -736,7 +736,7 @@ function admin_booking_status(string $ref, array $b): void {
   if (!in_array($s, STATUSES, true)) fail('Choose a valid status.');
 
   // Validate status transition
-  $stErr = validate_status_transition($old['status'], $s, true, $old['preferred_date'], $old['time']);
+  $stErr = validate_status_transition($old['status'], $s, true, $old['preferred_date'], $old['time'], $old['payment_status'] ?? null, $old['therapist_id'] ?? null);
   if ($stErr) fail($stErr, 400);
 
   $admin = admin_actor();

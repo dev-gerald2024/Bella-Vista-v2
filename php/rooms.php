@@ -644,6 +644,12 @@ function assign_appointment_room(int $bookingId, int $roomId, string $adminName 
   $room = get_room_by_id($roomId);
   if (!$room) fail('Room not found.', 404);
 
+  // The room chosen by the customer at booking time is fixed and cannot be changed.
+  $booked = trim((string)($bk['room_id'] ?? ''));
+  if ($booked !== '' && $booked !== $room['room_code']) {
+    fail("The room for this booking ({$booked}) was selected by the customer and cannot be changed.", 403);
+  }
+
   // Validate guest capacity
   if ($guests < (int)$room['min_guests'] || $guests > (int)$room['max_capacity']) {
     fail("Room {$room['room_code']} capacity ({$room['min_guests']}–{$room['max_capacity']} guests) does not fit this booking ({$guests} guests).", 400);

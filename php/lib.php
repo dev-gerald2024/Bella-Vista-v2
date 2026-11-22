@@ -140,7 +140,7 @@ function validate_24h_policy(string $date, string $time): array {
 /* ---------- status transitions (Part 9) ---------- */
 const VALID_STATUSES = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO-SHOW', 'REJECTED'];
 
-function validate_status_transition(string $old, string $new, bool $isAdmin = false, ?string $date = null, ?string $time = null): ?string {
+function validate_status_transition(string $old, string $new, bool $isAdmin = false, ?string $date = null, ?string $time = null, ?string $paymentStatus = null, $therapistId = null): ?string {
   if (!in_array($new, VALID_STATUSES, true)) {
     return "Invalid status '$new'.";
   }
@@ -162,6 +162,16 @@ function validate_status_transition(string $old, string $new, bool $isAdmin = fa
   $allowedNext = $allowed[$old] ?? [];
   if (!in_array($new, $allowedNext, true)) {
     return "Cannot transition status from $old to $new.";
+  }
+
+  if ($new === 'IN_PROGRESS' && empty($therapistId)) {
+    return 'Cannot start treatment: no therapist has been assigned to this booking yet. Please assign a therapist first.';
+  }
+
+  // Treatment can only start or complete once the booking is partially paid or fully paid
+  $okPay = ($new === 'COMPLETED') ? ['PARTIALLY_PAID', 'PAID', 'REFUNDED'] : ['PARTIALLY_PAID', 'PAID'];
+  if (in_array($new, ['IN_PROGRESS', 'COMPLETED'], true) && !in_array(strtoupper((string)($paymentStatus ?? 'UNPAID')), $okPay, true)) {
+    return ($new === 'COMPLETED' ? 'Cannot complete this appointment: the customer has not paid yet. A partial or full payment is required first.' : 'Cannot start treatment: the customer has not paid yet. A partial or full payment is required first.');
   }
 
   // Audit F4: prevent marking COMPLETED for future dates/times
@@ -294,7 +304,8 @@ function smtp_read($fp): array {
   return [$code, $all];
 }
 function smtp_cmd($fp, string $cmd, array $ok): string {
-  if ($cmd !== '') fwrite($fp, $cmd . "\r\n");
+  if ($cmd !== '') fwrite($fp, $cmd . "
+");
   [$code, $all] = smtp_read($fp);
   if (!in_array($code, $ok, true)) throw new RuntimeException('SMTP error ' . $code);
   return $all;
@@ -322,11 +333,23 @@ function smtp_send(string $to, string $subject, string $text): void {
     smtp_cmd($fp, 'MAIL FROM:<' . $fromAddr . '>', [250]);
     smtp_cmd($fp, 'RCPT TO:<' . $to . '>', [250, 251]);
     smtp_cmd($fp, 'DATA', [354]);
-    $headers = "Date: " . gmdate('r') . "\r\nFrom: $from\r\nTo: <$to>\r\nSubject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n"
-      . "Message-ID: <" . bin2hex(random_bytes(8)) . "@bellavista>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n";
-    $body = chunk_split(base64_encode($text), 76, "\r\n");
-    smtp_cmd($fp, $headers . "\r\n" . $body . "\r\n.", [250]);
-    @fwrite($fp, "QUIT\r\n");
+    $headers = "Date: " . gmdate('r') . "
+From: $from
+To: <$to>
+Subject: =?UTF-8?B?" . base64_encode($subject) . "?=
+"
+      . "Message-ID: <" . bin2hex(random_bytes(8)) . "@bellavista>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+";
+    $body = chunk_split(base64_encode($text), 76, "
+");
+    smtp_cmd($fp, $headers . "
+" . $body . "
+.", [250]);
+    @fwrite($fp, "QUIT
+");
   } finally { fclose($fp); }
 }
 
