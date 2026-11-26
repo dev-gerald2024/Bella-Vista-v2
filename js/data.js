@@ -11,12 +11,21 @@ const CONFIG = {
     mapQuery:
       "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3865.6028796117225!2d120.90700007486741!3d14.334484986120897!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397d4d9ae4ccbc1%3A0x4b3949da355185a1!2sBella%20Vista!5e0!3m2!1sen!2sph!4v1795153490117!5m2!1sen!2sph",
   },
-  hero: { img: "assets/images/Serene-Plumeria-Spa-Massage.png" },
-  ambiance: { img: "assets/images/relax_2.png" },
+  hero: { img: "assets/images/Serene-Plumeria-Spa-Massage.jpg", more: ["assets/images/Bella-Vista-Oasis-Spa-Serenity.jpg", "assets/images/Bella-Vista-Oasis-Spa-Retreat.png"] },
+  ambiance: { img: "assets/images/Bella-Vista-Oasis-Spa-Retreat.png" },
+  /* each inner page has its own banner photo (before, every page used the same one) */
+  pageHeroes: {
+    about: "assets/images/Tranquil Spa Still Life with Candles and Frangipani.png",
+    services: "assets/images/alan-caishan-cU53ZFBr3lk-unsplash.jpg",
+    accommodations: "assets/images/antonio-araujo-T4fuKGw1ijM-unsplash.jpg",
+    wellness: "assets/images/christin-hume-0MoF-Fe0w0A-unsplash.jpg",
+    faqs: "assets/images/stevepb-massage-therapy-1612308.jpg",
+    contact: "assets/images/mariolh-woman-567021_1920.jpg",
+  },
   about: [
+
+    { img: "assets/images/kaimiano-massage-1929064.jpg" },
     { img: "assets/images/tuanfoto-woman-6144774_1920.jpg" },
-    { img: "assets/images/Bella-Vista-Oasis-Spa-Serenity.png" },
-    { img: "assets/images/about-3.png" },
   ],
 
   wellness: { img: "assets/images/tremaestro-massage-therapy-1584711.jpg" },
@@ -24,22 +33,25 @@ const CONFIG = {
   stayInfo: "",
   faqExtra: [],
   wellnessItems: [],
+  team: [],
   gallery: [] /* filled from the admin dashboard (see CONFIG.ready below) */,
   rooms: [
     {
       name: "Executive Room",
-      desc: "Private single treatment room with en-suite shower, ambient lighting, and therapeutic massage bed.",
-      img: "assets/images/executive-room.jpg",
+      desc: "Private room for 1 guest, with en-suite shower, ambient lighting and a therapeutic massage bed.",
+      img: "assets/images/single-spa.jpg",
+      pos: "50% 72%" /* portrait photo in a landscape card: keep the bed in frame */,
     },
     {
       name: "Junior Suite",
-      desc: "Couples deluxe suite featuring dual massage beds, aromatic steam shower, and relaxation lounge.",
+      desc: "Couples suite for 2 guests, with dual massage beds, an aromatic steam shower and a relaxation lounge.",
       img: "assets/images/couple-lounge.jpg",
+      pos: "50% 55%" /* portrait photo in a landscape card: keep both lounge beds in frame */,
     },
     {
       name: "Premier Suite",
-      desc: "Luxury VIP spa pavilion with hydrotherapy tub, private couples treatment area, and garden view.",
-      img: "assets/images/single-spa.jpg",
+      desc: "Our VIP group lounge, for family or friends visiting together. Comfortable for 4 guests, and up to 6 with an additional guest fee.",
+      img: "assets/images/premier-lounge.jpg",
     },
   ],
   services: [
@@ -127,6 +139,10 @@ CONFIG.ready = (async () => {
               ...base[i],
               desc: x.desc || base[i].desc,
               cat: x.cat || base[i].cat,
+              ...(Array.isArray(x.durations) && x.durations.length
+                ? { durations: x.durations, prices: x.prices || {}, minDuration: Math.min(...x.durations), maxDuration: Math.max(...x.durations) }
+                : {}),
+              ...(x.active === false ? { active: false } : {}),
             };
           } else {
             const n = {
@@ -134,6 +150,10 @@ CONFIG.ready = (async () => {
               desc: x.desc || "",
               cat: x.cat || "Wellness",
               img: "",
+              ...(Array.isArray(x.durations) && x.durations.length
+                ? { durations: x.durations, prices: x.prices || {}, minDuration: Math.min(...x.durations), maxDuration: Math.max(...x.durations) }
+                : {}),
+              ...(x.active === false ? { active: false } : {}),
             };
             room
               ? base.splice(Math.max(0, base.length - 1), 0, n)
@@ -142,46 +162,48 @@ CONFIG.ready = (async () => {
         });
       };
     mix(CONFIG.services, d.services, false);
+    CONFIG.services = CONFIG.services.filter((x) => x.active !== false);   // switched off in the dashboard: not shown, not bookable
     mix(CONFIG.rooms, d.rooms, true);
     CONFIG.faqExtra = (d.faqs || []).filter((x) => x && x.q && x.a);
     CONFIG.wellnessItems = (d.wellness || []).filter((x) => x && x.name);
+    CONFIG.team = (d.team || []).filter((x) => x && x.name);
     CONFIG.gallery = (d.gallery || []).filter(
       (x) => x && /^assets\//.test(x.path || ""),
     );
     const CT = {
-        "Brand statement": (t) => {
-          SITE.statement = t;
-        },
-        Address: (t) => {
-          CONFIG.contact.address = t;
-        },
-        Phone: (t) => {
-          CONFIG.contact.phone = t;
-        },
-        Email: (t) => {
-          if (/^[^\s"'<>@]+@[^\s"'<>@]+\.[^\s"'<>@]+$/.test(t))
-            CONFIG.contact.email = t;
-        },
-        "Opening hours": (t) => {
-          CONFIG.contact.hours = t;
-        },
-        "Accommodation information": (t) => {
-          CONFIG.stayInfo = t;
-        },
-        "Room amenities": (t) => {
-          CONFIG.amenities = t
-            .split(/\r?\n/)
-            .map((s) => s.trim())
-            .filter(Boolean);
-        },
+      "Brand statement": (t) => {
+        SITE.statement = t;
       },
+      Address: (t) => {
+        CONFIG.contact.address = t;
+      },
+      Phone: (t) => {
+        CONFIG.contact.phone = t;
+      },
+      Email: (t) => {
+        if (/^[^\s"'<>@]+@[^\s"'<>@]+\.[^\s"'<>@]+$/.test(t))
+          CONFIG.contact.email = t;
+      },
+      "Opening hours": (t) => {
+        CONFIG.contact.hours = t;
+      },
+      "Accommodation information": (t) => {
+        CONFIG.stayInfo = t;
+      },
+      "Room amenities": (t) => {
+        CONFIG.amenities = t
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      },
+    },
       seen = {};
     (d.content || []).forEach((x) => {
       if (!x || seen[x.section] || !CT[x.section] || !x.text) return;
       seen[x.section] = 1;
       CT[x.section](x.text);
     });
-  } catch {}
+  } catch { }
 })();
 
 /* Navigation: single source for header, mobile menu and footer. [label, href, page key] */
@@ -227,48 +249,4 @@ function buildFAQ() {
     else base.push([x.q, x.a]);
   });
   return base;
-}
-
-/* Philippine mobile number formatter (11 digits, 09XX XXX XXXX) */
-function cleanPhone(s) {
-  let d = String(s || "").replace(/\D/g, "");
-  if (d.startsWith("639") && d.length === 12) d = "0" + d.slice(2);
-  else if (d.startsWith("9") && d.length === 10) d = "0" + d;
-  return d;
-}
-function isValidPhone(s) {
-  const d = cleanPhone(s);
-  return /^09\d{9}$/.test(d);
-}
-function formatPhone(s) {
-  const d = cleanPhone(s);
-  if (/^09\d{9}$/.test(d)) {
-    return d.slice(0, 4) + " " + d.slice(4, 7) + " " + d.slice(7, 11);
-  }
-  return s;
-}
-function formatPhoneInput(el) {
-  if (!el) return;
-  el.setAttribute("maxlength", "13");
-  el.setAttribute("placeholder", "09XX XXX XXXX");
-  el.setAttribute("autocomplete", "tel");
-  const applyMask = () => {
-    let raw = el.value.replace(/\D/g, "");
-    if (raw.length > 0 && !raw.startsWith("0")) {
-      if (raw.startsWith("9")) raw = "0" + raw;
-      else if (raw.startsWith("639")) raw = "0" + raw.slice(2);
-      else raw = "09" + raw;
-    } else if (raw.length >= 2 && !raw.startsWith("09")) {
-      raw = "09" + raw.slice(2);
-    }
-    if (raw.length > 11) raw = raw.slice(0, 11);
-    let fmt = "";
-    if (raw.length <= 4) fmt = raw;
-    else if (raw.length <= 7) fmt = raw.slice(0, 4) + " " + raw.slice(4);
-    else fmt = raw.slice(0, 4) + " " + raw.slice(4, 7) + " " + raw.slice(7, 11);
-    el.value = fmt;
-  };
-  el.addEventListener("input", applyMask);
-  el.addEventListener("paste", () => setTimeout(applyMask, 10));
-  if (el.value) applyMask();
 }

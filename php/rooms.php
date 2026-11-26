@@ -49,6 +49,37 @@ function calculate_package_price(array $pkg, int $guests): float {
   return $base;
 }
 
+/**
+ * Which package (room-category rate card) a new booking is linked to, decided on the server.
+ * A package is picked by code or id (the booking form sends the package of the chosen room's category). It must exist, be ACTIVE,
+ * belong to the same category as the booked room and fit the guest count. If the customer sent nothing and the pricing mode does
+ * not change the price (INDEPENDENT / INCLUSIVE), the active package of the room's category is linked automatically; in ADDITIVE
+ * mode nothing is added to a price unless the package was explicitly chosen.
+ */
+function resolve_booking_package(array $b, array $room, int $guests): ?array {
+  $ref = trim((string)($b['packageCode'] ?? $b['packageId'] ?? ''));
+  $mode = strtoupper((string)(cfg('PACKAGE_PRICING_RELATIONSHIP') ?: 'INDEPENDENT'));
+  if ($ref === '') {
+    if ($mode === 'ADDITIVE') return null;
+    $p = q1("SELECT p.*, rc.name AS category_name FROM packages p JOIN room_categories rc ON rc.code = p.category_code WHERE p.category_code = ? AND p.package_status = 'ACTIVE' AND ? BETWEEN p.min_guests AND p.max_capacity ORDER BY p.id LIMIT 1", [$room['category_code'], $guests]);
+    return $p ?: null;
+  }
+  $pkg = ctype_digit($ref) ? get_package((int)$ref) : get_package_by_code(strtoupper($ref));
+  if (!$pkg) fail('The selected package does not exist.', 400, ['field' => 'package', 'code' => 'package_not_found']);
+  if ($pkg['package_status'] !== 'ACTIVE') fail('The selected package is not available right now.', 409, ['field' => 'package', 'code' => 'package_inactive']);
+  if ($pkg['category_code'] !== $room['category_code']) fail("Package {$pkg['name']} is for a different room type than {$room['room_code']}.", 400, ['field' => 'package', 'code' => 'package_room_mismatch']);
+  if ($guests < (int)$pkg['min_guests'] || $guests > (int)$pkg['max_capacity']) fail("Package {$pkg['name']} is for {$pkg['min_guests']}-{$pkg['max_capacity']} guest(s); this booking has $guests.", 400, ['field' => 'package', 'code' => 'package_capacity']);
+  return $pkg;
+}
+/* Booking total from the treatment price and the package, following PACKAGE_PRICING_RELATIONSHIP:
+   INDEPENDENT (default) and INCLUSIVE: the treatment price is the total (the package rate is tracked separately / already covered);
+   ADDITIVE: treatment price + package price. */
+function booking_total_with_package(float $treatment, ?array $pkg, int $guests): float {
+  $mode = strtoupper((string)(cfg('PACKAGE_PRICING_RELATIONSHIP') ?: 'INDEPENDENT'));
+  if ($mode === 'ADDITIVE' && $pkg) return round($treatment + calculate_package_price($pkg, $guests), 2);
+  return round($treatment, 2);
+}
+
 function save_package(array $d, ?int $id = null): array {
   $code = strtoupper(trim(clean_name($d['package_code'] ?? $d['code'] ?? '')));
   $name = trim(clean_name($d['name'] ?? ''));
@@ -635,56 +666,92 @@ function get_available_therapists(string $date, string $time, int $durationMinut
 /**
  * Assigns an appointment to an eligible physical room.
  */
-function assign_appointment_room(int $bookingId, int $roomId, string $adminName = 'Admin'): array {
+/**
+ * Decide which room a new booking gets, entirely on the server. Never substitutes: a room the customer picked is
+ * either valid for this guest count and time, or the booking is refused with a clear reason.
+ *   ''/'auto'            -> best available room from the recommendation engine
+ *   room code / room id  -> exactly that room
+ *   category name/code   -> first free room of that category
+ */
+function resolve_booking_room(string $req, string $service, int $dur, int $guests, string $date, string $time): array {
+  $req = trim($req);
+  if ($req === '' || strtolower($req) === 'auto') {
+    $rec = get_room_recommendations($service, $dur, $guests, $date, $time);
+    if (!empty($rec['ok']) && !empty($rec['recommended'])) {
+      $rm = get_room_by_id((int)$rec['recommended']['id']);
+      if ($rm) return $rm;
+    }
+    if (!get_all_rooms(true)) fail('The spa has no rooms set up yet, so this reservation cannot be placed. Please contact the spa.', 409, ['code' => 'no_rooms_configured']);
+    fail('No suitable room is free for ' . $guests . ' guest' . ($guests === 1 ? '' : 's') . ' at that time. Please choose another time.', 409, ['field' => 'time', 'code' => 'no_room_available']);
+  }
+  $rm = ctype_digit($req) ? get_room_by_id((int)$req) : get_room_by_code(strtoupper($req));
+  if (!$rm) {   // maybe a whole category was chosen
+    $map = ['SINGLE' => 'SINGLE', 'SINGLE ROOM MASSAGE' => 'SINGLE', 'EXECUTIVE ROOM' => 'SINGLE', 'COUPLES' => 'COUPLES', 'COUPLES SUITE' => 'COUPLES', 'JUNIOR SUITE' => 'COUPLES',
+            'FAMILY' => 'FAMILY', 'FAMILY SPA LOUNGE' => 'FAMILY', 'PREMIER SUITE' => 'FAMILY'];
+    $cat = $map[strtoupper($req)] ?? null;
+    if (!$cat) fail('The selected room does not exist.', 400, ['field' => 'room', 'code' => 'room_not_found']);
+    foreach (get_available_rooms($date, $time, $dur, $guests) as $cand) if ($cand['category_code'] === $cat && $cand['room_status'] === 'AVAILABLE') return $cand;
+    fail('No room in that category is free for ' . $guests . ' guest(s) at that time. Please choose another room or time.', 409, ['field' => 'room', 'code' => 'category_full']);
+  }
+  if ($rm['room_status'] !== 'AVAILABLE') fail("Room {$rm['room_code']} is not open for booking right now (" . strtolower($rm['room_status']) . ').', 409, ['field' => 'room', 'code' => 'room_unavailable']);
+  if ($guests < (int)$rm['min_guests'] || $guests > (int)$rm['max_capacity']) {
+    fail("Room {$rm['room_code']} fits {$rm['min_guests']}-{$rm['max_capacity']} guest(s); this booking has $guests.", 400, ['field' => 'room', 'code' => 'room_capacity']);
+  }
+  $chk = is_room_available((int)$rm['id'], $date, $time, $dur);
+  if (!$chk['ok']) fail($chk['error'], 409, ['field' => 'room', 'code' => $chk['code']]);
+  return $rm;
+}
+
+function assign_appointment_room(int $bookingId, int $roomId, string $adminName = 'Admin', string $reason = ''): array {
   $bk = q1('SELECT * FROM bookings WHERE id = ?', [$bookingId]);
   if (!$bk) fail('Booking not found.', 404);
+  if (!in_array($bk['status'], ['PENDING', 'CONFIRMED'], true)) fail('Rooms can only be changed for pending or confirmed reservations.', 409);
   $dur = service_minutes($bk['service'], $bk['duration']) ?: 60;
   $guests = (int)($bk['guests'] ?? 1);
 
   $room = get_room_by_id($roomId);
   if (!$room) fail('Room not found.', 404);
+  if ($room['room_status'] !== 'AVAILABLE') fail("Room {$room['room_code']} is not open for booking right now (" . strtolower($room['room_status']) . ').', 409, ['code' => 'room_unavailable']);
 
-  // The room chosen by the customer at booking time is fixed and cannot be changed.
+  // Changing a room the customer already holds is allowed, but only with a written reason (kept in the log).
   $booked = trim((string)($bk['room_id'] ?? ''));
-  if ($booked !== '' && $booked !== $room['room_code']) {
-    fail("The room for this booking ({$booked}) was selected by the customer and cannot be changed.", 403);
-  }
+  $isChange = $booked !== '' && $booked !== $room['room_code'];
+  $reason = clean_text($reason, 300);
+  if ($isChange && mb_strlen($reason) < 5) fail("This booking already has room {$booked}. Enter a reason (at least 5 characters) to move it to {$room['room_code']}.", 400, ['code' => 'reason_required', 'field' => 'reason']);
 
   // Validate guest capacity
   if ($guests < (int)$room['min_guests'] || $guests > (int)$room['max_capacity']) {
-    fail("Room {$room['room_code']} capacity ({$room['min_guests']}–{$room['max_capacity']} guests) does not fit this booking ({$guests} guests).", 400);
+    fail("Room {$room['room_code']} capacity ({$room['min_guests']}–{$room['max_capacity']} guests) does not fit this booking ({$guests} guests).", 400, ['code' => 'room_capacity']);
   }
 
-  // Validate room availability
-  $chk = is_room_available($roomId, $bk['preferred_date'], $bk['time'], $dur, $bookingId);
-  if (!$chk['ok']) {
-    fail($chk['error'], 409, ['code' => $chk['code']]);
-  }
+  $endTime = $cleanEndTime = '';
+  with_day_lock($bk['preferred_date'], function () use ($bk, $roomId, $room, $dur, $bookingId, $adminName, $isChange, $reason, $booked, &$endTime, &$cleanEndTime) {
+    // availability is re-checked while the day lock is held, so two admins cannot both take the same room
+    $chk = is_room_available($roomId, $bk['preferred_date'], $bk['time'], $dur, $bookingId);
+    if (!$chk['ok']) fail($chk['error'], 409, ['code' => $chk['code']]);
 
-  $s = hm_to_min($bk['time']);
-  $e = $s + $dur;
-  $c = $e + buffer_minutes();
-  $endTime = min_to_hm($e);
-  $cleanEndTime = min_to_hm($c);
+    $e = hm_to_min($bk['time']) + $dur;
+    $endTime = min_to_hm($e);
+    $cleanEndTime = min_to_hm($e + buffer_minutes());
+    tx(function () use ($bk, $roomId, $room, $bookingId, $adminName, $endTime, $cleanEndTime, $isChange, $reason, $booked) {
+      // the previous assignment is kept as history (status RELEASED), never deleted
+      run("UPDATE appointment_room_assignments SET status = 'RELEASED' WHERE booking_id = ? AND status = 'ASSIGNED'", [$bookingId]);
+      run('INSERT INTO appointment_room_assignments (booking_id, room_id, assigned_date, start_time, end_time, cleaning_end_time, status, assigned_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [$bookingId, $roomId, $bk['preferred_date'], $bk['time'], $endTime, $cleanEndTime, 'ASSIGNED', $adminName]);
+      run('UPDATE bookings SET room_id = ? WHERE id = ?', [$room['room_code'], $bookingId]);
+      run('DELETE FROM room_cleaning WHERE booking_id = ? AND status = ?', [$bookingId, 'SCHEDULED']);
+      run('INSERT INTO room_cleaning (room_id, booking_id, cleaning_date, start_time, end_time, status, cleaned_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [$roomId, $bookingId, $bk['preferred_date'], $endTime, $cleanEndTime, 'SCHEDULED', '', "Automated post-treatment sanitization for booking #$bookingId"]);
+      admin_log(admin_actor(), $isChange ? 'Room changed' : 'Room assigned', bk_ref($bk),
+        ($isChange ? "Moved from $booked to {$room['room_code']} ({$room['room_name']}). Reason: $reason. " : "Assigned room {$room['room_code']} ({$room['room_name']}) ") . "for {$bk['preferred_date']} {$bk['time']}-{$cleanEndTime}", $adminName);
+      if ($isChange && !empty($bk['user_id'])) {
+        notify($bk['user_id'], "Your treatment room was changed to {$room['room_name']} ({$room['room_code']}). Date and time stay the same. Reason: $reason");
+        act($bk['user_id'], 'Room changed: ' . $bk['service']);
+      }
+    });
+  });
 
-  // Update or insert assignment
-  run("UPDATE appointment_room_assignments SET status = 'RELEASED' WHERE booking_id = ? AND status = 'ASSIGNED'", [$bookingId]);
-  run('INSERT INTO appointment_room_assignments (booking_id, room_id, assigned_date, start_time, end_time, cleaning_end_time, status, assigned_by) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-       [$bookingId, $roomId, $bk['preferred_date'], $bk['time'], $endTime, $cleanEndTime, 'ASSIGNED', $adminName]);
-
-  // Update room_id on booking
-  run('UPDATE bookings SET room_id = ? WHERE id = ?', [$room['room_code'], $bookingId]);
-
-  // Automatically schedule cleaning block for [treatment_end, treatment_end + 30m buffer]
-  run('DELETE FROM room_cleaning WHERE booking_id = ?', [$bookingId]);
-  run('INSERT INTO room_cleaning (room_id, booking_id, cleaning_date, start_time, end_time, status, cleaned_by, notes) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-       [$roomId, $bookingId, $bk['preferred_date'], $endTime, $cleanEndTime, 'SCHEDULED', '', "Automated post-treatment sanitization for booking #$bookingId"]);
-
-  admin_log(admin_actor(), 'Room assigned', bk_ref($bk), "Assigned room {$room['room_code']} ({$room['room_name']}) for {$bk['preferred_date']} {$bk['time']}-{$cleanEndTime}", $adminName);
-
-  return ['ok' => true, 'room' => $room, 'cleaning_end' => $cleanEndTime];
+  return ['ok' => true, 'room' => $room, 'cleaning_end' => $cleanEndTime, 'changed' => $isChange];
 }
 
 /**

@@ -27,11 +27,12 @@ const SC={
  "res-rooms":{t:"Spa Room",f:[["code","Room Code (e.g. SR-1)"],["name","Room Name"],["category","Category","select",["Single Room Massage","Couples Suite","Family Spa Lounge"]],["minGuests","Min Guests","number"],["stdCap","Standard Capacity","number"],["maxCap","Max Capacity","number"],["status","Physical Status","select",["AVAILABLE","MAINTENANCE","INACTIVE"]],["desc","Notes","textarea"]]},
  "res-pkgs":{t:"Package",f:[["code","Package Code (e.g. PKG-SR)"],["name","Package Name"],["category","Category","select",["Single Room Massage","Couples Suite","Family Spa Lounge"]],["duration","Duration (minutes)","number"],["basePrice","Base Price (\u20B1)","number"],["extraGuestPrice","Extra Guest Price (\u20B1)","number"],["status","Status","select",["ACTIVE","INACTIVE"]],["desc","Description","textarea"]]},
  "res-th":{t:"Therapist",f:[["code","Employee Code (e.g. TH-001)"],["name","Full Name"],["phone","Phone"],["email","Email"],["specializations","Specializations (comma-separated)"],["status","Employment Status","select",["ACTIVE","INACTIVE"]],["avail","Availability Status","select",["AVAILABLE","ON_BREAK","OFF_DUTY","ON_LEAVE","INACTIVE"]]]},
- services:{t:"Service",f:TXT},rooms:{t:"Accommodation",f:TXT},wellness:{t:"Wellness item",f:TXT},
+ services:{t:"Service",f:[...TXT,["durations","Durations in minutes, e.g. 60, 90"],["prices","Prices in PHP, same order, e.g. 800, 1100"],["active","Available for booking","select",["Yes","No"]]]},rooms:{t:"Accommodation",f:TXT},wellness:{t:"Wellness item",f:TXT},
  faqs:{t:"FAQ",f:[["q","Question"],["a","Answer","textarea"]]},
  content:{t:"Content block",f:[["section","Section","select",["Brand statement","Address","Phone","Email","Opening hours","Accommodation information","Room amenities"]],["text","Text (Room amenities: one per line)","textarea"]]},
+ team:{t:"Team member",f:[["name","Full name"],["role","Role / Position (e.g. Lead Developer)"],["bio","Short bio (500 characters at most)","textarea"],["photo","Photo (optional)","photo"],["email","Email (optional)"],["github","GitHub link, https://... (optional)"],["linkedin","LinkedIn link, https://... (optional)"]]},
  gallery:{t:"Gallery image",f:[["title","Title (caption)"],["path","Image file path, e.g. assets/images/spa.jpg"]]}};
-const HINT={wellness:"Items you add appear on the Wellness page under \"Wellness experiences\".",
+const HINT={team:"Members you add appear in the Meet the Team section of the About page (about.html). The section stays hidden until you add the first member. Upload each photo in the form.",wellness:"Items you add appear on the Wellness page under \"Wellness experiences\".",
  faqs:"Questions you add appear on the FAQs page after the built-in ones. A question worded exactly like a built-in one replaces its answer.",
  gallery:"Images appear in the Gallery section on the Home and About pages. First copy the image file into the project's assets/images folder, then enter its path here (for example assets/images/spa.jpg).",
  content:"Each block replaces one text on the public site: the footer, contact page, FAQ answers and accommodations. Use Edit to change a section that already has a block."};
@@ -54,6 +55,7 @@ const ICONS = {
   reviews: `<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
   reports: `<svg viewBox="0 0 24 24"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>`,
   content: `<svg viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
+  team: `<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
   gallery: `<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`,
   faqs: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`,
   notif: `<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`,
@@ -87,12 +89,8 @@ const NAV = [
     ["reviews", "Reviews"],
     ["reports", "Reports & Revenue"]
   ]],
-  ["WEBSITE", [
-    ["content", "Content"],
-    ["gallery", "Gallery"],
-    ["faqs", "FAQs"]
-  ]],
   ["SYSTEM", [
+    ["team", "Team Profiles"],
     ["notif", "Notifications"],
     ["log", "Activity Log"],
     ["settings", "Settings"]
@@ -119,8 +117,9 @@ const TT = {
   reports: "Reports & Revenue",
   revenue: "Reports & Revenue",
   content: "Website Content",
-  gallery: "Gallery Images",
-  faqs: "Frequently Asked Questions",
+  gallery: "Gallery Photos",
+  team: "Team Profiles",
+  faqs: "FAQs",
   notif: "Notifications",
   log: "Activity Log",
   settings: "Admin Settings",
@@ -148,12 +147,18 @@ NAV.slice(1).forEach(([grpName, items], idx) => {
 });
 $("#sn").innerHTML = navMarkup;
 
+let navOff = { "grp-4": true };
+try { navOff = JSON.parse(localStorage.getItem("bv_nav") || "null") || navOff; } catch (e) {}
 document.querySelectorAll(".nav-group-header").forEach(hdr => {
+  const g0 = hdr.closest(".nav-group");
+  if (navOff[g0.dataset.grp]) { g0.classList.add("collapsed"); hdr.setAttribute("aria-expanded", "false"); }
   const toggle = () => {
     const grp = hdr.closest(".nav-group");
     if (!grp) return;
     const isCollapsed = grp.classList.toggle("collapsed");
     hdr.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    navOff[grp.dataset.grp] = isCollapsed;
+    try { localStorage.setItem("bv_nav", JSON.stringify(navOff)); } catch (e) {}
   };
   hdr.addEventListener("click", toggle);
   hdr.addEventListener("keydown", e => {
@@ -163,10 +168,10 @@ document.querySelectorAll(".nav-group-header").forEach(hdr => {
     }
   });
 });
-const COLS={bookings:["name","service","date","time","guests","amount","paymentStatus","status"]},vis=k=>{const s=SC[k],c=COLS[k];return c?c.map(n=>s.f.find(f=>f[0]===n)):s.f.slice(0,3)};
+const COLS={team:["name","role","bio"],bookings:["name","service","date","time","guests","amount","paymentStatus","status"]},vis=k=>{const s=SC[k],c=COLS[k];return c?c.map(n=>s.f.find(f=>f[0]===n)):s.f.slice(0,3)};
 const bk=()=>ld("bookings"),bkAll=()=>bk().concat(DB.archivedBookings().map(b=>({...b,service:b.serviceName,status:cap(b.status),paymentStatus:b.paymentStatus||"UNPAID",paidAmount:b.paidAmount||0,remainingBalance:b.remainingBalance!==undefined?b.remainingBalance:b.amount}))),when=d=>d?new Date(d+"T00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"\u2014";
 const cell=(r,[n,,t])=>t==="textarea"?esc((r[n]||"").slice(0,90)):n==="amount"?(r[n]?peso(r[n]):"\u2014"):n==="status"?`<span class="pill ${esc(r[n]).toLowerCase()}">${esc(r[n])}</span>`:n==="paymentStatus"?`<span class="pill ${(r[n]||"unpaid").toLowerCase()}">${esc((r[n]||"UNPAID").replace(/_/g," "))}</span>`:n==="date"?when(r[n]):n==="service"?esc(r[n]||"\u2014")+((r.roomName||r.therapistName)?`<br><small style="color:var(--forest)">${r.roomName?"🚪 "+esc(r.roomName):""}${r.roomName&&r.therapistName?" · ":""}${r.therapistName?"👤 "+esc(r.therapistName):""}</small>`:""):esc(r[n]||"\u2014");
-const empty=m=>`<div class="empty">${m}</div>`,table=(h,rows)=>`<div class="tw"><table><thead><tr>${h.map(x=>`<th>${x}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+const empty=m=>`<div class="empty">${m}</div>`,table=(h,rows)=>`<div class="tw"><table><thead><tr>${h.map(x=>`<th${x==="Actions"?' class="ac"':""}>${x}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
 /* ---- search, filter and pagination for every long list. Search/filter/page/rows-per-page are remembered per list. ---- */
 const GS={},GR={},SIZES=[10,25,50],gst=k=>GS[k]||(GS[k]={q:"",f:{},p:1,n:10}),gk=el=>el.closest("[data-g]").dataset.g;
 const opt=(v,t,cur)=>`<option value="${esc(v)}"${String(cur)===String(v)?" selected":""}>${esc(t)}</option>`;
@@ -186,33 +191,78 @@ function pager(k,total,a,n,pages){const st=gst(k),nums=[];
 const STATUS_OPT=[["","All statuses"],["Pending","Pending"],["Confirmed","Confirmed"],["In_progress","In Progress"],["Completed","Completed"],["Cancelled","Cancelled"],["No-show","No-show"],["Rejected","Rejected"]];
 function list(k,flt){const s=SC[k],all=ld(k),rows=all.filter(flt||(()=>1)),bkg=k==="bookings",td=day(new Date());
  const hint=bkg?"":(k==="services"||k==="rooms")?`<p class="demo">Items you add here appear on the public site${k==="services"?" and in the booking list":""}. An item with the same name as a built-in one replaces its text. Built-in items cannot be removed from here.</p>`:`<p class="demo">${esc(HINT[k]||"")}</p>`;
- const items=rows.map(r=>({h:`<tr>${vis(k).map(f=>`<td>${cell(r,f)}</td>`).join("")}<td class="a">${bkg?bact(r):`<button class="btn s" data-a="edit" data-k="${k}" data-i="${r.id}">Edit</button>`}<button class="btn s d" data-a="del" data-k="${k}" data-i="${r.id}">${bkg?"Archive":"Delete"}</button></td></tr>`,
+ const items=rows.map(r=>({h:`<tr>${vis(k).map(f=>`<td${bkg&&/^(date|time|guests|amount|paymentStatus|status)$/.test(f[0])?' class="nw"':""}>${cell(r,f)}</td>`).join("")}<td class="a">${bkg?bact(r):`<button class="btn s" data-a="edit" data-k="${k}" data-i="${r.id}">Edit</button><button class="btn s d" data-a="del" data-k="${k}" data-i="${r.id}">Delete</button>`}</td></tr>`,
   s:flat(r),f:{status:r.status,when:bkg?(r.date===td?"today":r.date>td?"upcoming":"past"):"",category:r.category||""}}));
  const cats=[...new Set(rows.map(r=>r.category).filter(Boolean))].sort(),fl=bkg?[{k:"status",t:"Status",o:k==="bookings"&&flt?[["","All"]]:STATUS_OPT},{k:"when",t:"Date",o:[["","All dates"],["today","Today"],["upcoming","Upcoming"],["past","Past"]]}]:cats.length?[{k:"category",t:"Category",o:[["","All categories"]].concat(cats.map(c=>[c,c]))}]:[];
- if(bkg&&flt)fl.shift();   /* the Pending list is already one status */
- return hint+`<div class="bar"><span>${rows.length} ${rows.length===1?"record":"records"}</span><button class="btn" data-a="add" data-k="${k}">Add ${s.t.toLowerCase()}</button></div>`+grid(bkg&&flt?"b-pend":k,{ph:bkg?"Search name, email, phone, service or booking ID":"Search "+s.t.toLowerCase()+"s",head:vis(k).map(f=>f[1].replace(/ \(.*/,"")).concat(["Actions"]),items,fl,empty:"Nothing here yet. Use the button above to add the first record."})}
+ if(bkg){fl.length=0}   /* status and date now use the chips above the list */
+ return hint+`<div class="bar"><span>${rows.length} ${rows.length===1?"record":"records"}</span><button class="btn" data-a="add" data-k="${k}">Add ${s.t.toLowerCase()}</button></div>`+(bkg?bchips(all,!!flt,td):"")+grid(bkg&&flt?"b-pend":k,{ph:bkg?"Search name, email, phone, service or booking ID":"Search "+s.t.toLowerCase()+"s",head:vis(k).map(f=>f[1].replace(/ \(.*/,"")).concat(["Actions"]),items,fl,empty:"Nothing here yet. Use the button above to add the first record."})}
+
+const CLST={SCHEDULED:"Scheduled",IN_PROGRESS:"In progress",COMPLETED:"Completed"};
+const cln=c=>({...c,cleaning_status:c.cleaning_status||c.status||"SCHEDULED",treatment_end_time:c.treatment_end_time||c.start_time||"",cleaning_end_time:c.cleaning_end_time||c.end_time||"",cleaning_notes:c.cleaning_notes||c.notes||""});
+const cleanTasks=()=>DB.cleanings().map(cln);
+const BST=[["","All"],["Pending","Pending"],["Confirmed","Confirmed"],["In_progress","In progress"],["Completed","Completed"],["Cancelled","Cancelled"],["Rejected","Rejected"],["No-show","No-show"]];
+const BWH=[["","Any date"],["today","Today"],["upcoming","Upcoming"],["past","Past"]];
+function bchips(all,pendPage,td){
+ const st=gst(pendPage?"b-pend":"bookings").f,cs=st.status||"",cw=st.when||"";
+ const n=v=>v?all.filter(r=>r.status===v).length:all.length;
+ const chip=(f,v,t,on,cnt)=>`<button type="button" class="chip${on?" on":""}" data-a="gchip" data-f="${f}" data-v="${v}" aria-pressed="${on}">${t}${cnt===undefined?"":` <span class="cn">${cnt}</span>`}</button>`;
+ return `<div class="chips" aria-label="Filter bookings by status">${BST.map(([v,t])=>chip("status",v,t,pendPage?v==="Pending":cs===v,n(v))).join("")}</div>
+ <div class="chips sm" aria-label="Filter bookings by date">${BWH.map(([v,t])=>chip("when",v,t,cw===v)).join("")}</div>`}
 const stBtn=(r,v,t,cls)=>`<button class="btn s${cls?" "+cls:""}" data-a="st" data-k="bookings" data-i="${r.id}" data-v="${v}">${t}</button>`;
-const bact=r=>((r.status==="Pending"||r.status==="Confirmed")?`<button class="btn s" data-a="asgn" data-i="${r.id}">Assign</button>`:"")+
-  (r.status==="Pending"
-  ?stBtn(r,"Confirmed","Confirm")+stBtn(r,"Rejected","Reject","d")+stBtn(r,"Cancelled","Cancel","d")
-  :r.status==="Confirmed"
-    ?stBtn(r,"In_progress","Start")+stBtn(r,"Completed","Complete")+stBtn(r,"No-show","No-show","d")+stBtn(r,"Cancelled","Cancel","d")
-    :r.status==="In_progress"
-      ?stBtn(r,"Completed","Complete")+stBtn(r,"Cancelled","Cancel","d")
-      :"");
-const day=d=>d.toISOString().slice(0,10);let cm=new Date();cm.setDate(1);
+const bact=r=>{
+ const P=r.status==="Pending",C=r.status==="Confirmed",I=r.status==="In_progress";
+ const main=P?stBtn(r,"Confirmed","Confirm")+stBtn(r,"Rejected","Reject","d")
+  :C?stBtn(r,"In_progress","Start")+stBtn(r,"Completed","Complete")
+  :I?stBtn(r,"Completed","Complete"):"";
+ const mi=(a,t,x,cls)=>`<button type="button" class="mi${cls?" "+cls:""}" data-a="${a}" ${x}>${t}</button>`;
+ const items=((P||C)?mi("asgn","Assign room or therapist",`data-i="${r.id}"`):"")
+  +(C?mi("st","Mark as no-show",`data-k="bookings" data-i="${r.id}" data-v="No-show"`,"d"):"")
+  +((P||C||I)?mi("st","Cancel booking",`data-k="bookings" data-i="${r.id}" data-v="Cancelled"`,"d"):"")
+  +mi("del","Archive",`data-k="bookings" data-i="${r.id}"`,"d");
+ return `<div class="ra">${main}<details class="mnu"><summary class="btn s" aria-label="More actions" title="More actions">&#8943;</summary><div class="mnu-l">${items}</div></details></div>`};
+const day=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");let cm=new Date();cm.setDate(1);
+/* collapsible sections: a chevron next to the heading shows or hides the section; the choice is remembered in this browser */
+let colS={};try{colS=JSON.parse(localStorage.getItem("bv_collapsed")||"{}")||{}}catch(e){}
+const cSec=(key,title,body,first)=>`<section class="cs${colS[key]?" off":""}"><h2 class="sec"${first?' style="margin-top:0"':""}><button type="button" class="cs-h" data-a="cs" data-c="${key}" aria-expanded="${!colS[key]}">${title}<svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button></h2><div class="cs-b">${body}</div></section>`;
+const lineChart=(labels,vals,o={})=>{
+ const W=o.W||560,H=o.H||240,L=o.W?64:58,R=28,T=18,B=34,n=vals.length,fmt=o.fmt||(v=>String(v)),max=Math.max(...vals,1),
+ /* whole-number ticks only (no repeated 1,1,1 labels): step is 1, 2 or 5 x 10^k and never below 1 */
+ raw=max/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),step=Math.max(o.minStep||1,[1,2,5,10].map(m=>m*mag).find(v=>v>=raw)),top=Math.ceil(max/step)*step,
+ ticks=Array.from({length:Math.round(top/step)+1},(_,i)=>i*step),
+ x=i=>L+(n<2?(W-L-R)/2:i*(W-L-R)/(n-1)),y=v=>T+(H-T-B)*(1-v/top),
+ grid=ticks.map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(197,164,109,.35)"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end" font-size="12" fill="#4a5a4d">${esc(fmt(v))}</text>`).join(""),
+ pts=vals.map((v,i)=>x(i)+","+y(v)).join(" "),
+ area=n>1?`<polygon points="${x(0)},${y(0)} ${pts} ${x(n-1)},${y(0)}" fill="${o.c||"#203A2A"}" opacity=".08"/>`:"";
+ return `<svg class="lc${o.W?" wide":""}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label||"Line graph")}: ${labels.map((l,i)=>l+" "+fmt(vals[i])).join(", ")}">${grid}${area}<polyline points="${pts}" fill="none" stroke="${o.c||"#203A2A"}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${vals.map((v,i)=>`<circle cx="${x(i)}" cy="${y(v)}" r="${o.W?4:4.5}" fill="#fff" stroke="${o.c||"#203A2A"}" stroke-width="2.5"><title>${esc(labels[i]+": "+fmt(v))}</title></circle>`).join("")}${labels.map((l,i)=>`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="12" fill="#4a5a4d">${esc(l)}</text>`).join("")}</svg>`};
 const V={
- dash(){const b=bk(),rev=bkAll().filter(x=>/Confirmed|Completed/.test(x.status)).reduce((a,x)=>a+Number(x.amount||0),0),today=b.filter(x=>x.date===day(new Date()));
-  const unasgn=b.filter(x=>/Pending|Confirmed/.test(x.status)&&!x.roomName).length;
-  return (DB.live()&&DB.checks().some(c=>!c.ok)?`<p class="demo" style="color:#a33;font-weight:600">${DB.checks().filter(c=>!c.ok).length} setup item(s) need attention for a live site. <a href="#settings">Open Settings</a></p>`:"")+
-  (unasgn>0?`<p class="demo" style="color:#8A6A28;font-weight:600;background:#fcf8ee;padding:10px 14px;border:1px solid #e2d1a6">Notice: <b>${unasgn}</b> active booking(s) need a room or therapist assigned. Go to <a href="#b-all">All Bookings</a> to assign resources.</p>`:"")+
-  `<p class="demo">Live data from the spa server.</p><div class="cards"><div class="card"><small>Total bookings</small><b>${b.length}</b></div><div class="card"><small>Pending</small><b>${b.filter(x=>x.status==="Pending").length}</b></div><div class="card"><small>Confirmed</small><b>${b.filter(x=>x.status==="Confirmed").length}</b></div><div class="card"><small>Spa Rooms</small><b>${DB.rooms().length}</b></div><div class="card"><small>Active Therapists</small><b>${DB.therapists().filter(x=>x.employment_status==="ACTIVE").length}</b></div><div class="card"><small>Customers</small><b>${cust().length}</b></div><div class="card"><small>Revenue (entered)</small><b>${peso(rev)}</b></div></div>
-  <h2 class="sec">Today's bookings</h2>${today.length?`<ul class="l">${today.map(x=>`<li>${esc(x.name)} \u2014 ${esc(x.service||"No service")}${x.roomName?" \u00B7 Room: "+esc(x.roomName):""}<small>${esc(x.status)}</small></li>`).join("")}</ul>`:empty("No bookings today.")}
-  <h2 class="sec">Recent activity</h2>${V.log(5)}`},
+ dash(){const b=bk(),all=bkAll(),td=day(new Date()),rev=all.filter(x=>/Confirmed|Completed/.test(x.status)).reduce((q,x)=>q+Number(x.amount||0),0),
+  today=b.filter(x=>x.date===td&&!/Cancelled|Rejected/.test(x.status)).sort((p,q)=>String(p.time||"").localeCompare(String(q.time||""))),
+  pend=b.filter(x=>x.status==="Pending").length,
+  resch=DB.reschedules().filter(x=>x.status==="PENDING").length,
+  unasgn=b.filter(x=>/Pending|Confirmed/.test(x.status)&&!x.roomName).length,
+  pcash=Number((DB.paymentAnalytics()||{}).pendingCashAmount||0),
+  rooms=DB.rooms(),freeRooms=rooms.filter(r=>(r.liveStatus||r.room_status)==="AVAILABLE").length,
+  ths=DB.therapists(),freeTh=ths.filter(t=>t.employment_status==="ACTIVE"&&t.availability_status==="AVAILABLE").length,
+  now=b.filter(x=>x.status==="In_progress").length,
+  tile=(href,label,n,warn)=>`<a class="card go${warn&&n?" warn":""}" href="${href}"><small>${label}</small><b>${n}</b></a>`,
+  upc=b.filter(x=>x.date>td&&/Pending|Confirmed/.test(x.status)).sort((p,q)=>(p.date+String(p.time||"")).localeCompare(q.date+String(q.time||""))).slice(0,5),
+  wk=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i);const k=day(d);return{k,l:i===0?"Today":d.toLocaleDateString("en-US",{weekday:"short"}),d:d.getDate(),n:b.filter(x=>x.date===k&&!/Cancelled|Rejected/.test(x.status)).length}}),
+  wmax=Math.max(1,...wk.map(x=>x.n)),
+  tr=Array.from({length:14},(_,i)=>{const d=new Date();d.setDate(d.getDate()-13+i);const k=day(d);return{l:i===0?d.toLocaleDateString("en-US",{month:"short",day:"numeric"}):String(d.getDate()),n:b.filter(x=>x.date===k&&!/Cancelled|Rejected/.test(x.status)).length}}),
+  fmt=t=>{if(!t)return "";const[h,m]=String(t).split(":").map(Number);return (h%12||12)+":"+String(m||0).padStart(2,"0")+(h<12?" AM":" PM")};
+  return   `<div class="qa"><button class="btn" data-a="add" data-k="bookings">Add booking</button><a class="btn s" href="#b-pend">Review pending${pend?" ("+pend+")":""}</a><a class="btn s" href="#b-cal">Open calendar</a></div><h2 class="sec">Needs your attention</h2><p class="demo" style="margin:0 0 8px"><button type="button" class="btn s" data-a="remind">Send appointment reminders</button> <small>Notifies customers with a booking in the next 24 hours who keep reminders on. Each booking is reminded once.</small></p><div class="cards">${tile("#b-pend","Pending bookings",pend,1)}${tile("#b-res","Reschedule requests",resch,1)}${tile("#b-all","Bookings without a room",unasgn,1)}${tile("#pay-dash","Cash to collect at the spa",peso(pcash),0)}</div>
+  <h2 class="sec">Today</h2><div class="cards">${tile("#b-cal","Appointments today",today.length,0)}${tile("#b-all","In progress now",now,0)}${tile("#res-rooms","Rooms available now",freeRooms+" of "+rooms.length,0)}${tile("#res-th","Therapists available now",freeTh+" of "+ths.length,0)}</div>
+  ${today.length?`<ul class="l">${today.map(x=>`<li><b>${fmt(x.time)}</b> ${esc(x.name)} — ${esc(x.service||"No service")}${x.roomName?" · "+esc(x.roomName):' · <span style="color:#8A6A28">no room yet</span>'}<small>${esc(String(x.status).replace("_"," "))}</small></li>`).join("")}</ul>`:empty("No appointments today.")}
+  ${cSec("dash-14","Bookings, last 14 days",`<section class="pr-card">${lineChart(tr.map(x=>x.l),tr.map(x=>x.n),{label:"Bookings per day, last 14 days",W:1040,H:230})}<p class="demo" style="margin:8px 0 0">Appointments by date, excluding cancelled and rejected.</p></section>`)}
+  <div class="dsplit"><div><h2 class="sec">Coming up</h2>${upc.length?`<ul class="l">${upc.map(x=>`<li><b>${when(x.date)} ${fmt(x.time)}</b> ${esc(x.name)} \u2014 ${esc(x.service||"No service")}<small>${esc(String(x.status).replace("_"," "))}</small></li>`).join("")}</ul>`:empty("Nothing booked ahead yet. Add a booking to fill the calendar.")}</div>
+  <div><h2 class="sec">Next 7 days</h2><div class="wk" role="img" aria-label="Bookings per day for the next 7 days">${wk.map(x=>`<div class="wkc"><span class="wkn">${x.n}</span><i style="height:${Math.round(x.n/wmax*100)}%"></i><small>${x.l}<br>${x.d}</small></div>`).join("")}</div></div></div>
+  <h2 class="sec">Recent activity</h2>${V.log(5)}
+  <h2 class="sec">Totals</h2><div class="cards"><div class="card"><small>All bookings</small><b>${b.length}</b></div><div class="card"><small>Customers</small><b>${cust().length}</b></div><div class="card"><small>Amounts entered on confirmed or completed bookings (not real income)</small><b>${peso(rev)}</b></div></div>`},
  "b-all":()=>list("bookings"),"b-arch"(){const a=DB.archivedBookings();return `<p class="demo">Archived bookings are kept with their payment records and still count in reports and revenue. Restore returns one to All Bookings.</p>`+grid("b-arch",{ph:"Search archived bookings",head:["Customer","Service","Date","Amount","Status","Actions"],empty:"No archived bookings.",fl:[{k:"status",t:"Status",o:STATUS_OPT}],
   items:a.map(r=>({h:`<tr><td>${esc(r.name)}</td><td>${esc(r.serviceName)}</td><td>${when(r.date)}</td><td>${r.amount?peso(r.amount):"—"}</td><td><span class="pill ${esc(r.status).toLowerCase()}">${esc(cap(r.status))}</span></td><td class="a"><button class="btn s" data-a="restore" data-i="${esc(r.id)}">Restore</button><button class="btn s d" data-a="del-perm" data-i="${esc(r.id)}" style="margin-left:4px">Delete Permanently</button></td></tr>`,s:flat(r),f:{status:cap(r.status)}}))})},"b-pend":()=>list("bookings",r=>r.status==="Pending"),
- "b-cal"(){const y=cm.getFullYear(),m=cm.getMonth(),n=new Date(y,m+1,0).getDate(),s=cm.getDay(),b=bk();let c=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div class="h">${d}</div>`).join("")+'<div class="n"></div>'.repeat(s);
-  for(let d=1;d<=n;d++){const k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;c+=`<div><b>${d}</b>${b.filter(x=>x.date===k).map(x=>`<span class="i ${esc(x.status).toLowerCase()}" title="${esc(x.name)}">${esc(x.name)}</span>`).join("")}</div>`}
+ "b-cal"(){const y=cm.getFullYear(),m=cm.getMonth(),n=new Date(y,m+1,0).getDate(),s=cm.getDay(),b=bk();let c=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div class="h">${d}</div>`).join("")+Array.from({length:s},(_,i)=>`<div class="n"><b>${new Date(y,m,0).getDate()-s+i+1}</b></div>`).join("");
+  for(let d=1;d<=n;d++){const k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;c+=`<div><b>${d}</b>${b.filter(x=>x.date===k).map(x=>`<span class="i ${esc(x.status).toLowerCase()}" title="${esc(x.name)} \u2014 ${esc(x.service||"")} ${esc(x.status)}${x.roomName?" \u00B7 "+esc(x.roomName):" \u00B7 no room yet"}">${esc(String(x.time||"").slice(0,5))} ${esc(x.name)}${x.roomName?" ("+esc(x.roomName)+")":""}</span>`).join("")}</div>`}
+  c+=Array.from({length:(7-(s+n)%7)%7},(_,i)=>`<div class="n"><b>${i+1}</b></div>`).join("");
   return `<div class="bar"><button class="btn s" data-a="cal" data-v="-1">&larr; Prev</button><h2>${cm.toLocaleDateString(undefined,{month:"long",year:"numeric"})}</h2><button class="btn s" data-a="cal" data-v="1">Next &rarr;</button></div><div class="cal">${c}</div>`},
  "res-rooms"(){
   const rooms=DB.rooms();
@@ -261,7 +311,7 @@ const V={
   });
  },
  "res-clean"(){
-  const cleanings=DB.cleanings();
+  const cleanings=cleanTasks();
   const rooms=DB.rooms();
   const roomCards=rooms.map(r=>`
     <div class="card" style="padding:14px">
@@ -272,44 +322,40 @@ const V={
     </div>
   `).join("");
 
-  return `<h2 class="sec" style="margin-top:0">Room Operational States</h2>
-  <div class="cards" style="margin-bottom:24px">${roomCards}</div>
-  <h2 class="sec">30-Minute Cleaning Buffer Log</h2>
-  <p class="demo">Every completed treatment triggers a mandatory 30-minute cleaning buffer. Early cleaning completion logs the task but preserves the buffer for schedule availability.</p>`+
+  return cSec("clean-rooms","Room Operational States",`<div class="cards" style="margin-bottom:24px">${roomCards}</div>`,1)+
+  cSec("clean-log","30-Minute Cleaning Buffer Log",`<p class="demo">Every completed treatment triggers a mandatory 30-minute cleaning buffer. Early cleaning completion logs the task but preserves the buffer for schedule availability.</p>`+
   grid("res-clean",{
     ph:"Search room, booking, cleaner",
-    head:["ID","Room","Booking ID","Treatment End","Cleaning End (Buffer)","Status","Cleaned By","Actions"],
-    empty:"No cleaning tasks recorded.",
+    head:["ID","Date","Room","Booking","Treatment ends","Cleaning ends","Status","Cleaned by","Actions"],
+    empty:"No cleaning tasks yet. A task appears here automatically when a booking is assigned a room (30 minutes after the treatment ends). Confirm a booking and assign it a room to see one.",
     items:cleanings.map(c=>({
-      h:`<tr><td>#${c.id}</td><td><b>${esc(c.room_code||"Room "+c.room_id)}</b></td><td>${esc(c.booking_id)}</td><td>${esc(c.treatment_end_time||"—")}</td><td><b>${esc(c.cleaning_end_time||"—")}</b></td><td><span class="pill ${c.cleaning_status.toLowerCase()}">${esc(c.cleaning_status)}</span></td><td>${esc(c.cleaned_by||"Pending")}${c.cleaning_notes?`<br><small>${esc(c.cleaning_notes)}</small>`:""}</td><td class="a"><button class="btn s" data-a="upd-clean" data-i="${c.id}">Update Status</button></td></tr>`,
+      h:`<tr><td>#${c.id}</td><td class="nw">${c.cleaning_date?when(c.cleaning_date):"\u2014"}</td><td><b>${esc(c.room_code||"Room "+c.room_id)}</b></td><td>${esc(c.booking_id)}</td><td>${esc(c.treatment_end_time||"—")}</td><td><b>${esc(c.cleaning_end_time||"—")}</b></td><td><span class="pill ${c.cleaning_status.toLowerCase()}">${esc(CLST[c.cleaning_status]||c.cleaning_status)}</span></td><td>${esc(c.cleaned_by||"Not yet")}${c.cleaning_notes?`<br><small>${esc(c.cleaning_notes)}</small>`:""}</td><td class="a"><button class="btn s" data-a="upd-clean" data-i="${c.id}">Update Status</button></td></tr>`,
       s:flat(c),
       f:{status:c.cleaning_status}
     }))
-  });
+  }));
  },
  "pay-dash"(){
   const a=DB.paymentAnalytics()||{};
   const m=a.methods||{};
   return `
-   <div class="sim-alert">SIMULATED PAYMENT TOTALS — NOT ACTUAL REVENUE</div>
-   <div class="demo-banner">DEMO PAYMENT SYSTEM — NO REAL MONEY WILL BE TRANSFERRED.<br>All customer transactions, wallets, bank accounts, and receipts are local simulations.</div>
    <div class="cards">
-    <div class="card"><small>Total Simulated Payments</small><b style="color:var(--forest)">${peso(a.totalSimulatedPayments)}</b></div>
+    <div class="card"><small>Total Payments</small><b style="color:var(--forest)">${peso(a.totalSimulatedPayments)}</b></div>
     <div class="card"><small>Pending Cash at Spa</small><b style="color:#b45309">${peso(a.pendingCashAmount)}</b></div>
-    <div class="card"><small>Total Simulated Refunds</small><b style="color:#991b1b">${peso(a.totalRefundedAmount)}</b></div>
+    <div class="card"><small>Total Refunds</small><b style="color:#991b1b">${peso(a.totalRefundedAmount)}</b></div>
     <div class="card"><small>Forfeited Downpayments</small><b style="color:#991b1b">${peso(a.totalForfeitedAmount)}</b></div>
     <div class="card"><small>Fully Paid Bookings</small><b>${a.fullyPaidBookingsCount||0}</b></div>
     <div class="card"><small>Partially Paid</small><b>${a.partiallyPaidBookingsCount||0}</b></div>
     <div class="card"><small>Unpaid Bookings</small><b>${a.unpaidBookingsCount||0}</b></div>
    </div>
-   <h2 class="sec">Payment Method Summary (Simulated)</h2>
+   <h2 class="sec">Payment Method Summary</h2>
    <div class="cards">
-    <div class="card"><small>GCash Demo</small><b>${m.GCASH_DEMO?m.GCASH_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.GCASH_DEMO?m.GCASH_DEMO.amount:0)}</small></div>
-    <div class="card"><small>Maya Demo</small><b>${m.MAYA_DEMO?m.MAYA_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.MAYA_DEMO?m.MAYA_DEMO.amount:0)}</small></div>
+    <div class="card"><small>GCash</small><b>${m.GCASH_DEMO?m.GCASH_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.GCASH_DEMO?m.GCASH_DEMO.amount:0)}</small></div>
+    <div class="card"><small>Maya</small><b>${m.MAYA_DEMO?m.MAYA_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.MAYA_DEMO?m.MAYA_DEMO.amount:0)}</small></div>
     <div class="card"><small>Cash at Spa (Confirmed)</small><b>${m.CASH_AT_SPA?m.CASH_AT_SPA.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.CASH_AT_SPA?m.CASH_AT_SPA.amount:0)}</small></div>
-    <div class="card"><small>Bank Transfer Demo</small><b>${m.BANK_TRANSFER_DEMO?m.BANK_TRANSFER_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.BANK_TRANSFER_DEMO?m.BANK_TRANSFER_DEMO.amount:0)}</small></div>
+    <div class="card"><small>Bank Transfer</small><b>${m.BANK_TRANSFER_DEMO?m.BANK_TRANSFER_DEMO.count:0} txns</b><small style="color:var(--forest);font-weight:600">${peso(m.BANK_TRANSFER_DEMO?m.BANK_TRANSFER_DEMO.amount:0)}</small></div>
    </div>
-   <h2 class="sec">Recent Demo Transactions</h2>
+   <h2 class="sec">Recent Transactions</h2>
    ${V["pay-txns"](true)}
   `;
  },
@@ -317,13 +363,13 @@ const V={
   const txns=DB.allTxns()||[];
   const head=["Ref","Booking","Customer","Method","Type","Amount","Status","Actions"];
   const STATUS_TXN_OPT=[["","All statuses"],["PAID","Paid"],["PENDING","Pending"],["REFUNDED","Refunded"],["PARTIALLY_REFUNDED","Partially Refunded"],["FORFEITED","Forfeited"],["FAILED","Failed"],["CANCELLED","Cancelled"]];
-  const METHOD_OPT=[["","All methods"],["GCASH_DEMO","GCash Demo"],["MAYA_DEMO","Maya Demo"],["CASH_AT_SPA","Cash at Spa"],["BANK_TRANSFER_DEMO","Bank Transfer Demo"]];
+  const METHOD_OPT=[["","All methods"],["GCASH_DEMO","GCash"],["MAYA_DEMO","Maya"],["CASH_AT_SPA","Cash at Spa"],["BANK_TRANSFER_DEMO","Bank Transfer"]];
   const items=txns.map(t=>({
    h:`<tr>
     <td><b>${esc(t.transactionRef||t.id)}</b></td>
     <td>${esc(t.bookingId)}</td>
     <td>${esc(t.customerId||"—")}</td>
-    <td>${esc(t.paymentMethodLabel||t.paymentMethod||"Demo")}</td>
+    <td>${esc(t.paymentMethodLabel||t.paymentMethod||"—")}</td>
     <td><small>${esc((t.transactionType||"DOWNPAYMENT").replace(/_/g," "))}</small></td>
     <td><b>${peso(t.amount)}</b></td>
     <td><span class="pill ${t.status.toLowerCase()}">${esc(t.status)}</span></td>
@@ -344,52 +390,33 @@ const V={
    fl:[{k:"status",t:"Status",o:STATUS_TXN_OPT},{k:"method",t:"Method",o:METHOD_OPT}],
    items
   });
-  return (isMini?'':`<div class="sim-alert">SIMULATED PAYMENT TOTALS — NOT ACTUAL REVENUE</div><div class="demo-banner">DEMO PAYMENT SYSTEM — NO REAL MONEY WILL BE TRANSFERRED. All records shown are local simulations.</div>`)+gridHtml;
+  return (isMini?'':``)+gridHtml;
  },
  "pay-sett"(){
   const s=DB.paymentSettings()||{};
   const dp=s.DOWNPAYMENT_PERCENTAGE||"25";
   const minDp=s.MIN_DOWNPAYMENT_AMOUNT||"500.00";
   const allowFull=s.ALLOW_FULL_PAYMENT!=="0";
-  const demoActive=s.DEMO_MODE_ACTIVE!=="0";
   const forfeitLate=s.FORFEIT_LATE_CANCELLATION!=="0";
+  const sw=(id,on,t,d,lock)=>`<label class="sw"><input type="checkbox" id="${id}" ${on?"checked":""}${lock?" disabled":""}><span><b>${t}</b><small>${d}</small></span></label>`;
   return `
-   <div class="demo-banner">DEMO PAYMENT RULES & CONFIGURATION</div>
-   <div style="background:#fff;border:1px solid #c9bfa4;padding:24px;border-radius:4px;max-width:640px">
-    <form id="pay-sett-form" novalidate>
-     <div class="f">
-      <label for="set-dp">Required Downpayment Percentage (%)</label>
-      <input type="number" id="set-dp" min="1" max="100" value="${esc(dp)}" required>
-      <small style="color:var(--mut)">Formula: Downpayment = Total Amount * (Percentage / 100). Default is 25%.</small>
+   <form id="pay-sett-form" class="prf" novalidate>
+    <section class="pr-card">
+     <h2 class="sec">Downpayment</h2>
+     <div class="pr-row">
+      <div class="f"><label for="set-dp">Percentage of the total (%)</label><input type="number" id="set-dp" min="1" max="100" value="${esc(dp)}" required></div>
+      <div class="f"><label for="set-mindp">Minimum amount (&#8369;)</label><input type="number" id="set-mindp" min="0" step="50" value="${esc(minDp)}" required></div>
      </div>
-     <div class="f" style="margin-top:14px">
-      <label for="set-mindp">Minimum Downpayment Amount (₱)</label>
-      <input type="number" id="set-mindp" min="0" step="50" value="${esc(minDp)}" required>
-     </div>
-     <div class="f" style="margin-top:14px">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-       <input type="checkbox" id="set-allowfull" ${allowFull?'checked':''}>
-       <span>Allow customers to pay full amount in advance</span>
-      </label>
-     </div>
-     <div class="f" style="margin-top:14px">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-       <input type="checkbox" id="set-forfeit" ${forfeitLate?'checked':''}>
-       <span>Enforce 24-hour late cancellation downpayment forfeiture</span>
-      </label>
-     </div>
-     <div class="f" style="margin-top:14px">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-       <input type="checkbox" id="set-demo" ${demoActive?'checked':''}>
-       <span>Demo Mode Active (Always enabled)</span>
-      </label>
-     </div>
-     <div class="dr" style="margin-top:20px">
-      <button class="btn" type="submit">Save Payment Settings</button>
-     </div>
-    </form>
-   </div>
-  `;
+     <p class="pr-hint">The customer pays the percentage of the total, or the minimum amount if that is higher (never more than the total).</p>
+     <div class="pr-ex" aria-live="polite"><span>Try an amount</span><input type="number" id="pr-try" min="0" step="100" value="800" aria-label="Sample booking total in pesos"><b id="pr-out"></b></div>
+    </section>
+    <section class="pr-card">
+     <h2 class="sec">Rules</h2>
+     ${sw("set-allowfull",allowFull,"Allow full payment in advance","Customers can pay the whole amount instead of only the downpayment.")}
+     ${sw("set-forfeit",forfeitLate,"Keep the downpayment on late cancellation","Cancelling less than 24 hours before the appointment forfeits the downpayment.")}
+    </section>
+    <div class="dr pr-save"><button class="btn" type="submit">Save payment rules</button></div>
+   </form>`;
  },
  services(){
    const tabNav=`<div style="display:flex;gap:10px;margin-bottom:18px;border-bottom:1px solid rgba(197,164,109,.3);padding-bottom:12px">
@@ -412,7 +439,7 @@ const V={
    </div>`;
    return tabNav+`<p class="demo">Specialized wellness experiences shown on the public Wellness page (wellness.html).</p>`+list("wellness");
   },
-  faqs:()=>list("faqs"),content:()=>list("content"),gallery:()=>list("gallery"),
+  faqs:()=>list("faqs"),content:()=>list("content"),gallery:()=>list("gallery"),team:()=>list("team"),
  "b-res"(){const R=DB.reschedules(),pc=x=>x.status==="APPROVED"?"confirmed":x.status==="DECLINED"?"cancelled":x.status==="PENDING"?"pending":"inactive",tm=t=>t?t:"";
   return `<p class="demo">Customers ask to move a booking here. Approving moves it to the new time after the same double-booking check as any booking. Declining keeps the original time and tells the customer.</p>`+grid("b-res",{ph:"Search customer, service or booking ID",head:["Customer","Booking","Now","Requested","Reason","Status","Actions"],empty:"No reschedule requests yet.",
   fl:[{k:"status",t:"Status",o:[["","All requests"],["PENDING","Pending"],["APPROVED","Approved"],["DECLINED","Declined"],["WITHDRAWN","Withdrawn"]]}],
@@ -434,6 +461,9 @@ const V={
 
    const by=(f)=>{const map={};b.forEach(x=>{const k=x[f]||"Unspecified";map[k]=(map[k]||0)+1});return Object.entries(map)};
 
+   const now=new Date(),ms=Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);return{k:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),l:d.toLocaleDateString(undefined,{month:"short",year:"2-digit"})}});
+   const live=b.filter(x=>!/Cancelled|Rejected/.test(x.status));
+   const cRev=ms.map(o=>m[o.k]||0),cBk=ms.map(o=>live.filter(x=>(x.date||"").slice(0,7)===o.k).length);
    return `
      <p class="demo">Comprehensive operational reports and revenue analytics compiled from all booking records.</p>
      <div class="cards" style="margin-bottom:24px">
@@ -443,19 +473,17 @@ const V={
        <div class="card"><small>Avg. Revenue / Booking</small><b>${peso(avgTicket)}</b></div>
      </div>
 
-     <h2 class="sec" style="margin-top:0">Monthly Revenue Summary</h2>
-     <p class="demo">Revenue sums amounts entered on confirmed or completed bookings.</p>
-     ${revBookings.length?table(["Month","Revenue"],Object.entries(m).sort().map(([k,v])=>`<tr><td><b>${esc(k)}</b></td><td><b style="color:var(--forest)">${peso(v)}</b></td></tr>`).join("")):empty("No revenue recorded yet.")}
+     ${cSec("rep-charts","Trends, last 6 months",`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px">
+       <div class="pr-card"><h3 class="ct">Revenue</h3>${lineChart(ms.map(o=>o.l),cRev,{fmt:peso,label:"Monthly revenue",minStep:100})}</div>
+       <div class="pr-card"><h3 class="ct">Bookings</h3>${lineChart(ms.map(o=>o.l),cBk,{c:"#735617",label:"Bookings per month"})}<p class="demo" style="margin:8px 0 0">Excludes cancelled and rejected bookings.</p></div>
+     </div>`,1)}
+     <div style="height:28px"></div>
+     ${cSec("rep-monthly","Monthly Revenue Summary",`<p class="demo">Revenue sums amounts entered on confirmed or completed bookings.</p>
+     ${revBookings.length?table(["Month","Revenue"],Object.entries(m).sort().map(([k,v])=>`<tr><td><b>${esc(k)}</b></td><td><b style="color:var(--forest)">${peso(v)}</b></td></tr>`).join("")):empty("No revenue recorded yet.")}`,1)}
 
      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-top:28px">
-       <div>
-         <h2 class="sec" style="margin-top:0">Bookings by Status</h2>
-         ${table(["Status","Count"],by("status").map(([k,v])=>`<tr><td><span class="pill ${esc(k).toLowerCase()}">${esc(k)}</span></td><td><b>${v}</b></td></tr>`).join(""))}
-       </div>
-       <div>
-         <h2 class="sec" style="margin-top:0">Bookings by Service</h2>
-         ${table(["Service","Count"],by("service").map(([k,v])=>`<tr><td>${esc(k)}</td><td><b>${v}</b></td></tr>`).join(""))}
-       </div>
+       <div>${cSec("rep-status","Bookings by Status",table(["Status","Count"],by("status").map(([k,v])=>`<tr><td><span class="pill ${esc(k).toLowerCase()}">${esc(k)}</span></td><td><b>${v}</b></td></tr>`).join("")),1)}</div>
+       <div>${cSec("rep-service","Bookings by Service",table(["Service","Count"],by("service").map(([k,v])=>`<tr><td>${esc(k)}</td><td><b>${v}</b></td></tr>`).join("")),1)}</div>
      </div>
    `;
   },
@@ -464,7 +492,12 @@ const V={
  log(n){const all=DB.adminLog(),li=x=>`<li><b>${esc(x.admin||"Admin")}</b> — ${esc(x.action)}${x.target?" · "+esc(x.target):""}${x.detail?"<br>"+esc(x.detail):""}<small>${new Date(x.at).toLocaleString()}</small></li>`;
   if(n){const l=all.slice(0,n);return l.length?`<ul class="l">${l.map(li).join("")}</ul>`:empty("No activity yet.")}
   return grid("log",{list:1,ph:"Search activity",empty:"No activity yet.",items:all.map(x=>({h:li(x),s:flat(x),f:{action:x.action}})),fl:[{k:"action",t:"Action",o:[["","All actions"]].concat([...new Set(all.map(x=>x.action))].sort().map(a=>[a,a]))}]})},
- settings:()=>`<p class="demo">Signed in as ${esc(U.fullName)} (${esc(U.email)}) \u00B7 Administrator. The admin role is stored in the database (users.role).</p><h2 class="sec" style="margin-top:0">Security check</h2><ul class="l">${DB.checks().map(c=>`<li><span class="pill ${c.ok?"confirmed":"cancelled"}">${c.ok?"OK":"To do"}</span> <b>${esc(c.title)}</b><br>${esc(c.fix)}</li>`).join("")}</ul><h2 class="sec">Change password</h2><form id="apw" novalidate style="max-width:360px"><div class="f"><label for="pc">Current password</label><input id="pc" type="password" autocomplete="current-password"></div><div class="f"><label for="pn">New password</label><input id="pn" type="password" autocomplete="new-password"></div><div class="f"><label for="pf">Confirm new password</label><input id="pf" type="password" autocomplete="new-password"></div><button class="btn" type="submit">Update password</button><p id="apwm" role="status" style="font-size:.85rem;margin-top:10px"></p></form>`};
+ settings:()=>{
+  const tabs=[["biz","Business info"],["rules","Booking rules"],["acct","Account"]];
+  const body=stab==="rules"?setRules():stab==="acct"?setAcct():setBiz();
+  return `<div class="stabs" role="tablist">${tabs.map(([k,t])=>`<button type="button" role="tab" class="${stab===k?"on":""}" aria-selected="${stab===k}" data-a="stab" data-v="${k}">${t}</button>`).join("")}</div><div class="spane">${body}</div>`}
+};
+
 function cust(){const m={};
  DB.customers().filter(c=>c.role!=="ADMIN").forEach(c=>{m[c.id]={key:c.id,reg:true,active:c.active!==false,name:c.fullName,email:c.email,phone:c.phone,n:0,last:""}});
  bkAll().forEach(x=>{const k=x.customerId||(x.email||x.name||"").toLowerCase();if(!k)return;const c=m[k]||(m[k]={key:k,reg:false,active:true,name:x.name,email:x.email,phone:x.phone,n:0,last:""});c.n++;if((x.date||"")>c.last)c.last=x.date});return Object.values(m)}
@@ -473,6 +506,42 @@ function custView(key){const cu=DB.customers().find(c=>c.id===key||c.email===key
  <h3 class="sec" style="margin-top:6px">Booking history</h3>${bs.length?`<ul class="l">${bs.map(b=>`<li>${esc(b.serviceName)} <span class="pill ${b.status.toLowerCase()}">${b.status}</span><small>${when(b.date)} \u00B7 ${esc(b.id)}${b.cancelReason?" \u00B7 "+esc(b.cancelReason):""}</small></li>`).join("")}</ul>`:empty("No bookings.")}
  <h3 class="sec">Transaction history</h3>${ts.length?`<ul class="l">${ts.map(t=>`<li>${esc(t.id)} \u00B7 ${esc(t.description)} \u00B7 ${peso(t.amount)} <span class="pill ${t.status.toLowerCase()}">${t.status}</span><small>${esc(t.bookingId)}</small></li>`).join("")}</ul>`:empty("No transactions.")}
  <h3 class="sec">Activity timeline</h3>${cu&&DB.activity(cu.id).length?`<ul class="l">${DB.activity(cu.id).slice(0,10).map(a=>`<li>${esc(a.text)}<small>${new Date(a.at).toLocaleString()}</small></li>`).join("")}</ul>`:empty("No activity.")}`;$("#cvd").showModal()}
+
+/* ---- Settings page (tabs) ---- */
+let stab="biz";
+const BIZ=[["Address","Address","text","Shown in the footer and on the Contact page."],["Phone","Phone","text","Customers call or text this number."],["Email","Email","email","Where customers can reach the spa."],["Opening hours","Opening hours","text","For example: Daily, 1:00 PM - 9:00 PM."]];
+const BIZ_DEF={"Address":"123 Bella Vista Drive, Tagaytay City, Cavite 4120, Philippines","Phone":"+63 917 123 4567","Email":"hello@bellavistaoasis.example","Opening hours":"Daily, 1:00 PM - 9:00 PM"};
+const bizVal=sec=>{const b=ld("content").find(x=>x.section===sec);return b?b.text:(BIZ_DEF[sec]||"")};
+const setBiz=()=>`<form id="biz-form" class="pr-card sform" novalidate>
+ <h2 class="sec">Business info</h2>
+ <p class="pr-hint">These details appear on your public website. Changes show on the site right after you save.</p>
+ ${BIZ.map(([sec,t,type,h])=>`<div class="f"><label for="biz-${sec.replace(/\W/g,"")}">${t}</label><input id="biz-${sec.replace(/\W/g,"")}" data-sec="${esc(sec)}" type="${type}" value="${esc(bizVal(sec))}"><small class="fh">${h}</small></div>`).join("")}
+ <div class="dr"><button class="btn" type="submit">Save business info</button></div></form>`;
+const ruleRow=(t,v,h)=>`<li><div><b>${t}</b><small>${h}</small></div><span class="rv">${v}</span></li>`;
+const setRules=()=>`<section class="pr-card sform"><h2 class="sec">Booking rules</h2>
+ <p class="pr-hint">These rules are enforced on every booking. To change one, edit <code>php/config.php</code>. Payment rules have their own page.</p>
+ <ul class="rl">
+  ${ruleRow("Opening hours","1:00 PM to 9:00 PM","Treatment and cleaning must both finish before closing.")}
+  ${ruleRow("Cleaning buffer","30 minutes","Added after every treatment.")}
+  ${ruleRow("Cancel or reschedule notice","24 hours","Customers must ask at least this far ahead.")}
+  ${ruleRow("Reschedule requests","3 per booking","")}
+  ${ruleRow("Booking window","90 days ahead","")}
+  ${ruleRow("Minimum notice for same-day","60 minutes","")}
+  ${ruleRow("Open bookings per customer","5","Stops one account from holding the calendar.")}
+  ${ruleRow("Guests per booking","1 to 6","Depends on the suite.")}
+ </ul><div class="dr"><a class="btn s" href="#pay-sett">Open payment rules</a></div></section>`;
+const setAcct=()=>`<section class="pr-card sform"><h2 class="sec">Account</h2>
+ <p class="pr-hint">Signed in as <b>${esc(U.fullName)}</b> (${esc(U.email)}). Role: Administrator.</p>
+ <h3 class="sub">Change password</h3>
+ <form id="apw" novalidate><div class="f"><label for="pc">Current password</label><input id="pc" type="password" autocomplete="current-password"></div><div class="f"><label for="pn">New password</label><input id="pn" type="password" autocomplete="new-password"></div><div class="f"><label for="pf">Confirm new password</label><input id="pf" type="password" autocomplete="new-password"></div><button class="btn" type="submit">Update password</button><p id="apwm" role="status" style="font-size:.85rem;margin-top:10px"></p></form></section>`;
+let lastView=null,freshT;
+function countUp(root){
+ if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+ root.querySelectorAll(".card b").forEach(el=>{   /* plain counts only: a money amount must never show a half-way figure */
+  const m=el.textContent.match(/^(\d+)(\s.*)?$/);if(!m)return;
+  const end=+m[1],t0=performance.now();if(end<2)return;
+  const tick=t=>{const p=Math.min(1,(t-t0)/600);el.textContent=Math.round(end*(1-Math.pow(1-p,3)))+(m[2]||"");if(p<1)requestAnimationFrame(tick)};
+  requestAnimationFrame(tick)})}
 function show(){
  const v=(location.hash||"#dash").slice(1);
  const k=V[v]?v:"dash";
@@ -483,6 +552,8 @@ function show(){
 
  $("#ttl").textContent=TT[k]||TT[navKey]||"Dashboard";
  $("#ct").innerHTML=V[k]();
+ $("#ct").classList.toggle("fresh",k!==lastView);lastView=k;   /* card stagger + count-up only when the page changes, not on every filter click */
+ if($("#ct").classList.contains("fresh")){countUp($("#ct"));clearTimeout(freshT);freshT=setTimeout(()=>$("#ct").classList.remove("fresh"),1000)}
  $("#ct").style.animation="none";
  $("#ct").offsetWidth;
  $("#ct").style.animation="";
@@ -555,13 +626,13 @@ async function confirmDiscard(){
 }
 
 document.addEventListener("input", e=>{
- const f = e.target.closest("#df, #asgn-form, #maint-form, #clean-form, #refund-form, #pay-sett-form, #apw");
+ const f = e.target.closest("#df, #asgn-form, #maint-form, #clean-form, #refund-form, #pay-sett-form, #apw, #biz-form");
  if(f && f !== activeForm){
   trackForm(f);
  }
 });
 document.addEventListener("change", e=>{
- const f = e.target.closest("#df, #asgn-form, #maint-form, #clean-form, #refund-form, #pay-sett-form, #apw");
+ const f = e.target.closest("#df, #asgn-form, #maint-form, #clean-form, #refund-form, #pay-sett-form, #apw, #biz-form");
  if(f && f !== activeForm){
   trackForm(f);
  }
@@ -600,10 +671,18 @@ document.addEventListener("click", async e=>{
 
 /* add / edit form */
 let cur=null;
-function form(k,id){clearDirty();const s=SC[k],r=id?ld(k).find(x=>x.id===id):{status:"Pending",date:day(new Date())};cur={k,id};$("#dt").textContent=(id?"Edit ":"Add ")+s.t.toLowerCase();
- $("#fl").innerHTML=s.f.map(([n,l,t,o])=>`<div class="f"><label for="f_${n}">${l}</label>${t==="textarea"?`<textarea id="f_${n}" rows="3">${esc(r[n]||"")}</textarea>`:t==="select"?`<select id="f_${n}">${o.map(x=>`<option${r[n]===x?" selected":""}>${x}</option>`).join("")}</select>`:`<input id="f_${n}" type="${t||"text"}" value="${esc(r[n]||"")}"${t==="number"?' min="0"':""}>`}</div>`).join("");
+function form(k,id){clearDirty();const s=SC[k],r=id?ld(k).find(x=>String(x.id)===String(id)):{status:"Pending",date:day(new Date())};cur={k,id};$("#dt").textContent=(id?"Edit ":"Add ")+s.t.toLowerCase();
+ $("#fl").innerHTML=s.f.map(([n,l,t,o])=>`<div class="f"><label for="f_${n}">${l}</label>${t==="textarea"?`<textarea id="f_${n}" rows="3">${esc(r[n]||"")}</textarea>`:t==="photo"?`<input id="f_${n}" type="hidden" value="${esc(r[n]||"")}"><div class="ph-up"><div class="ph-pv" id="pv_${n}">${r[n]?`<img src="${esc(r[n])}" alt="">`:"<span>No photo</span>"}</div><div><input id="up_${n}" type="file" accept="image/jpeg,image/png,image/webp"><small id="ps_${n}">JPG, PNG or WebP. It is resized automatically.</small><button type="button" class="btn s d" id="pr_${n}"${r[n]?"":" hidden"}>Remove photo</button></div></div>`:t==="select"?`<select id="f_${n}">${o.map(x=>`<option${r[n]===x?" selected":""}>${x}</option>`).join("")}</select>`:`<input id="f_${n}" type="${t||"text"}" value="${esc(r[n]||"")}"${t==="number"?' min="0"':""}>`}</div>`).join("");
  const ph=$("#f_phone");if(ph)formatPhoneInput(ph);
  trackForm($("#df"));
+ s.f.filter(f=>f[2]==="photo").forEach(([n])=>{const inp=$("#up_"+n),hid=$("#f_"+n),pv=$("#pv_"+n),st=$("#ps_"+n),rm=$("#pr_"+n);
+  rm.onclick=()=>{hid.value="";pv.innerHTML="<span>No photo</span>";inp.value="";rm.hidden=true};
+  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;st.textContent="Uploading...";
+   try{const bmp=await createImageBitmap(f),sc=Math.min(1,480/Math.max(bmp.width,bmp.height)),c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    const r=await DB.uploadTeamPhoto(c.toDataURL("image/jpeg",.85));
+    if(!r.ok){st.textContent=r.data.error||"Upload failed.";inp.value="";return}
+    hid.value=r.data.path;pv.innerHTML=`<img src="${esc(r.data.path)}?t=${Date.now()}" alt="">`;st.textContent="Uploaded. Press Save to keep it.";rm.hidden=false}
+   catch{st.textContent="That file could not be read as an image.";inp.value=""}}});
  $("#dlg").showModal();$("#fl input,#fl select,#fl textarea").focus()}
 $("#df").addEventListener("submit",async e=>{e.preventDefault();const {k,id}=cur,s=SC[k],d={};s.f.forEach(([n])=>d[n]=$("#f_"+n).value.trim());
  if(!d[s.f[0][0]]){$("#f_"+s.f[0][0]).focus();return}
@@ -620,7 +699,7 @@ $("#df").addEventListener("submit",async e=>{e.preventDefault();const {k,id}=cur
  if(k==="res-pkgs"){const r=await DB.savePackage(d,id);if(!r.ok){Notice.error("Save Package Failed", r.data.error||"Could not save package.");return}await DB.loadAdmin();$("#dlg").close();show();return}
  if(k==="res-th"){const r=await DB.saveTherapist(d,id);if(!r.ok){Notice.error("Save Therapist Failed", r.data.error||"Could not save therapist.");return}await DB.loadAdmin();$("#dlg").close();show();return}
  const a=ld(k);if(k==="content"&&!id&&a.some(x=>x.section===d.section)){Notice.warning("Section Exists", "That section already has a block. Use Edit on it instead.");return}
- if(id){Object.assign(a.find(x=>x.id===id),d)}else{a.unshift({id:Date.now().toString(36),...d})}
+ if(id){Object.assign(a.find(x=>String(x.id)===String(id)),d)}else{a.unshift({id:Date.now().toString(36),...d})}
  const r=await sv(k,a);if(!r.ok)return;clearDirty();await log(`${id?"Edited":"Added"} ${s.t.toLowerCase()}: ${d[s.f[0][0]]}`);$("#dlg").close();show()});
 $("#dc").onclick=async()=>{if(await confirmDiscard())$("#dlg").close();};
 
@@ -640,8 +719,11 @@ $("#asgn-form").addEventListener("submit",async e=>{
    cancelLabel: "Cancel"
   });
   if(!ok) return;
-  if(roomId){
-    const r=await DB.assignRoom(bkId,roomId);
+  const curRoom=$("#asgn_r").getAttribute("data-cur")||"";
+  const reason=($("#asgn_reason")?$("#asgn_reason").value:"").trim();
+  if(roomId&&String(roomId)!==String(curRoom)&&curRoom&&reason.length<5){Notice.warning("Reason Required","Enter a reason (at least 5 characters) to change the customer's room.");return}
+  if(roomId&&String(roomId)!==String(curRoom)){
+    const r=await DB.assignRoom(bkId,roomId,reason);
     if(!r.ok){Notice.error("Room Assignment Failed", r.data.error||"Could not assign room.");return}
   }
   if(thId){
@@ -687,7 +769,7 @@ $("#clean-form").addEventListener("submit",async e=>{
   const clSt=$("#cl_st").value, clBy=$("#cl_by").value, clNote=$("#cl_note").value;
   const ok = await Notice.confirm({
    title: "Update Cleaning Status?",
-   message: "Update cleaning task #"+cid+" to status \""+clSt+"\""+(clBy?" (Staff: "+esc(clBy)+")":"")+"?",
+   message: "Update cleaning task #"+cid+" to status \""+(CLST[clSt]||clSt)+"\""+(clBy?" (Staff: "+esc(clBy)+")":"")+"?",
    confirmLabel: "Update Status",
    cancelLabel: "Cancel"
   });
@@ -748,6 +830,7 @@ function renderTherapistSched(t,schedData){
 }
 
 document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b)return;const {a,k,i,v}=b.dataset;
+ if(a==="cs"){const c=b.dataset.c,sec=b.closest(".cs");colS[c]=!colS[c];sec.classList.toggle("off",!!colS[c]);b.setAttribute("aria-expanded",String(!colS[c]));try{localStorage.setItem("bv_collapsed",JSON.stringify(colS))}catch(e){}return}
  if(a==="add")form(k);else if(a==="edit")form(k,i);
  else if(a==="del"){
   const bkg=k==="bookings";
@@ -774,7 +857,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
    show();
   } else {
    const items = ld(k);
-   const item = items.find(x=>x.id===i) || {};
+   const item = items.find(x=>String(x.id)===String(i)) || {};
    const recName = item.name || item.title || item.q || item.section || ("#" + i);
    const catName = SC[k] ? SC[k].t : "Record";
    const ok=await Notice.confirm({
@@ -811,6 +894,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
       ["Appointment Date", when(item.date)],
       ["Appointment Time", item.time || "—"],
       ["Assigned Suite", item.roomName || "Unassigned"],
+      ["Package", item.packageName || "None"],
       ["Guest Count", (item.guests || 1) + " guest(s)"],
       ["Booking Status", item.status || "—"],
       ["Payment Status", item.paymentStatus || "UNPAID"],
@@ -924,7 +1008,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
          const cur=(item.roomName||item.roomId)?rooms.find(r=>item.roomName===r.room_name||item.roomName===r.room_code||String(item.roomId||"")===r.room_code):null;
          if(item.roomName||item.roomId){
            const label=cur?`${esc(cur.room_code)} — ${esc(cur.room_name)} (${esc(cur.category_name||cur.category_code)}, max ${cur.max_capacity} guests)`:esc(item.roomName||item.roomId);
-           return `<select id="asgn_r" disabled title="Room was selected by the customer and cannot be changed"><option value="">${label}</option></select><small>Room is fixed to the customer's booking.</small>`;
+            return `<input type="hidden" id="asgn_r" value="" data-cur="${cur?cur.id:""}"><div style="padding:.6rem .8rem;border:1px solid var(--line,#ddd);border-radius:6px;background:rgba(0,0,0,.04)"><b>${label}</b></div><small>Room reserved by the customer at booking. It is fixed and cannot be changed.</small>`;
          }
          return `<select id="asgn_r"><option value="">-- Select Room --</option>${rooms.map(r=>`<option value="${r.id}">${esc(r.room_code)} — ${esc(r.room_name)} (${esc(r.category_name||r.category_code)}, max ${r.max_capacity} guests)</option>`).join("")}</select>`;
        })()}
@@ -974,7 +1058,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   show();
  }
  else if(a==="upd-clean"){
-  const c=DB.cleanings().find(x=>String(x.id)===String(i));
+  const c=cleanTasks().find(x=>String(x.id)===String(i));
   if(!c)return;
   $("#clean-body").innerHTML=`
     <p>Update cleaning log for <b>${esc(c.room_code||"Room "+c.room_id)}</b> (Booking #${c.booking_id})<br>
@@ -982,9 +1066,9 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
     <div class="f">
       <label for="cl_st">Cleaning Status</label>
       <select id="cl_st">
-        <option value="PENDING"${c.cleaning_status==="PENDING"?" selected":""}>PENDING</option>
-        <option value="IN_PROGRESS"${c.cleaning_status==="IN_PROGRESS"?" selected":""}>IN_PROGRESS</option>
-        <option value="COMPLETED"${c.cleaning_status==="COMPLETED"?" selected":""}>COMPLETED</option>
+        <option value="SCHEDULED"${c.cleaning_status==="SCHEDULED"?" selected":""}>Scheduled</option>
+        <option value="IN_PROGRESS"${c.cleaning_status==="IN_PROGRESS"?" selected":""}>In progress</option>
+        <option value="COMPLETED"${c.cleaning_status==="COMPLETED"?" selected":""}>Completed</option>
       </select>
     </div>
     <div class="f"><label for="cl_by">Cleaned By</label><input type="text" id="cl_by" value="${esc(c.cleaned_by||U.fullName)}"></div>
@@ -996,9 +1080,9 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
  else if(a==="sched"){
   const t=DB.therapists().find(x=>String(x.id)===String(i));
   if(!t)return;
-  const resp=await fetch("/api/admin/therapists/"+encodeURIComponent(t.id)+"/schedule",{credentials:"include"});
-  const dt=await resp.json();
-  renderTherapistSched(t,dt.schedule);
+  const resp=await Auth.api("/api/admin/therapists/"+encodeURIComponent(t.id)+"/schedule",null,"GET");
+  if(!resp.ok){Notice.error("Schedule Failed",(resp.data&&resp.data.error)||"Could not load the therapist schedule.");return}
+  renderTherapistSched(t,resp.data.schedule||[]);
   $("#sched-dlg").showModal();
  }
  else if(a==="addbreak"){
@@ -1214,14 +1298,14 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   const bk = bkAll().find(x=>String(x.id)===String(bkId)) || {};
   const ok = await Notice.confirm({
    title: "Apply Downpayment Forfeiture?",
-   message: "Are you sure you want to forfeit this simulated downpayment? The payment status will be marked as FORFEITED in accordance with the 24-hour cancellation policy.",
+   message: "Are you sure you want to forfeit this downpayment? The payment status will be marked as FORFEITED in accordance with the 24-hour cancellation policy.",
    details: [
      ["Booking Reference", "#" + bkId],
      ["Customer", bk.name || "—"],
      ["Amount Affected", peso(amt)],
      ["Policy Reason", "Late cancellation (< 24h notice)"],
-     ["Existing Payment Status", "PAID (DEMO)"],
-     ["Resulting Payment Status", "FORFEITED (DEMO)"]
+     ["Existing Payment Status", "PAID"],
+     ["Resulting Payment Status", "FORFEITED"]
    ],
    confirmLabel: "Confirm Forfeiture",
    cancelLabel: "Cancel",
@@ -1240,14 +1324,13 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   if(!tx)return;
   const bk = bkAll().find(x=>String(x.id)===String(tx.rawBookingId||tx.bookingId)) || {};
   $("#cash-body").innerHTML=`
-    <div class="demo-banner">DEMO PAYMENT SYSTEM — NO REAL MONEY WILL BE TRANSFERRED.</div>
     <table style="width:100%;font-size:.9rem;margin:12px 0;border-collapse:collapse">
      <tr><td style="color:var(--mut);padding:5px 0">Customer:</td><td><b>${esc(tx.customerName||bk.name||"—")}</b></td></tr>
      <tr><td style="color:var(--mut);padding:5px 0">Booking Reference:</td><td><b>${esc(tx.bookingId)}</b></td></tr>
      <tr><td style="color:var(--mut);padding:5px 0">Transaction Type:</td><td><b>${esc((tx.type||"CASH_AT_SPA").replace(/_/g," "))}</b></td></tr>
      <tr><td style="color:var(--mut);padding:5px 0">Amount:</td><td><b style="color:var(--forest);font-size:1.15rem">${peso(tx.amount)}</b></td></tr>
      <tr><td style="color:var(--mut);padding:5px 0">Current Payment Status:</td><td><span class="pill ${tx.status.toLowerCase()}">${esc(tx.status)}</span></td></tr>
-     <tr><td style="color:var(--mut);padding:5px 0">Resulting Payment Status:</td><td><span class="pill confirmed">PAID (DEMO)</span></td></tr>
+     <tr><td style="color:var(--mut);padding:5px 0">Resulting Payment Status:</td><td><span class="pill confirmed">PAID</span></td></tr>
     </table>
     <p class="note">Physical cash collected at front desk. Recording will credit the booking balance and issue a digital receipt.</p>
     <input type="hidden" id="cash_tid" value="${tx.id}">
@@ -1258,7 +1341,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   const rawB=b.dataset.b||i;
   const maxAmt=Number(b.dataset.amt||0);
   $("#refund-body").innerHTML=`
-    <p>Process simulated demo refund for <strong>${esc(rawB)}</strong>.</p>
+    <p>Process refund for <strong>${esc(rawB)}</strong>.</p>
     <div class="f">
      <label for="ref_amt">Refund Amount (₱)</label>
      <input type="number" id="ref_amt" step="50" min="1" max="${maxAmt}" value="${maxAmt}" required>
@@ -1277,11 +1360,10 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   if(res.ok&&res.data&&res.data.receipt){
    const rec=res.data.receipt;
    $("#rec-body").innerHTML=`
-    <div class="demo-banner">DEMO PAYMENT RECEIPT — NO REAL MONEY WILL BE TRANSFERRED.</div>
     <div style="background:#fff;border:1px solid #ddd;padding:16px;border-radius:4px">
      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:8px;margin-bottom:8px">
       <b>${esc(rec.receiptNumber)}</b>
-      <span class="pill confirmed">PAID (DEMO)</span>
+      <span class="pill confirmed">PAID</span>
      </div>
      <table style="width:100%;font-size:.88rem">
       <tr><td>Ref:</td><td><b>${esc(rec.transactionReference)}</b></td></tr>
@@ -1313,17 +1395,17 @@ if(cashBtn){
   if(!tx) return;
   const bk = bkAll().find(x=>String(x.id)===String(tx.rawBookingId||tx.bookingId)) || {};
   const ok = await Notice.confirm({
-   title: "Record Demo Payment?",
-   message: "Confirm recording simulated demo payment for this appointment?",
+   title: "Record Payment?",
+   message: "Confirm recording the payment for this appointment?",
    details: [
      ["Booking Reference", "#" + tx.bookingId],
      ["Customer", tx.customerName || bk.name || "—"],
-     ["Payment Method", "Cash at Spa (Demo)"],
+     ["Payment Method", "Cash at Spa"],
      ["Payment Type", (tx.type||"CASH_AT_SPA").replace(/_/g," ")],
      ["Amount", peso(tx.amount)],
      ["Existing Amount Paid", peso(bk.paidAmount || 0)],
      ["Remaining Balance", peso(Math.max(0, (bk.amount||tx.amount) - (bk.paidAmount||0) - tx.amount))],
-     ["New Payment Status", "PAID (DEMO)"]
+     ["New Payment Status", "PAID"]
    ],
    confirmLabel: "Confirm Payment",
    cancelLabel: "Cancel"
@@ -1356,16 +1438,16 @@ if(refForm){
   const reason=$("#ref_reason").value;
   const bk = bkAll().find(x=>String(x.id)===String(bid)) || {};
   const ok = await Notice.confirm({
-   title: "Process Demo Refund?",
-   message: "Are you sure you want to process a simulated demo refund of "+peso(amt)+" for booking #"+esc(bid)+"?",
+   title: "Process Refund?",
+   message: "Are you sure you want to process a refund of "+peso(amt)+" for booking #"+esc(bid)+"?",
    details: [
     ["Customer", bk.name || "—"],
     ["Booking", bid],
-    ["Type", "SIMULATED DEMO REFUND"],
+    ["Type", "REFUND"],
     ["Refund Amount", peso(amt)],
     ["Reason", reason || "Customer refund request"]
    ],
-   confirmLabel: "Issue Demo Refund",
+   confirmLabel: "Issue Refund",
    cancelLabel: "Cancel",
    danger: true
   });
@@ -1374,13 +1456,13 @@ if(refForm){
   try{
    const r=await DB.processRefund(bid,amt,reason);
    if(!r.ok){ Notice.error("Refund Failed", r.data.error||"Could not process refund."); return; }
-   Notice.toast("success", "Simulated demo refund of " + peso(amt) + " processed and credited immediately (~3s demo).");
+   Notice.toast("success", "Refund of " + peso(amt) + " processed and credited immediately.");
    clearDirty();
    await DB.loadAdmin();
    $("#refund-dlg").close();
    show();
   }finally{
-   if(subBtn){ subBtn.disabled = false; subBtn.textContent = "Issue Demo Refund"; }
+   if(subBtn){ subBtn.disabled = false; subBtn.textContent = "Issue Refund"; }
   }
  };
 }
@@ -1399,7 +1481,6 @@ document.addEventListener("submit",async e=>{
   await DB.savePaymentSetting("MIN_DOWNPAYMENT_AMOUNT",$("#set-mindp").value);
   await DB.savePaymentSetting("ALLOW_FULL_PAYMENT",$("#set-allowfull").checked?"1":"0");
   await DB.savePaymentSetting("FORFEIT_LATE_CANCELLATION",$("#set-forfeit").checked?"1":"0");
-  await DB.savePaymentSetting("DEMO_MODE_ACTIVE",$("#set-demo").checked?"1":"0");
   clearDirty();
   await DB.loadAdmin();
   Notice.toast("success", "Payment settings saved successfully.");
@@ -1468,4 +1549,53 @@ if(outBtn){
   await Auth.logout(true);
  };
 }
+
+/* ---- Settings tabs, business info save, row menus, payment preview ---- */
+document.addEventListener("click",e=>{
+ const ch=e.target.closest('[data-a="gchip"]');
+ if(ch){const f=ch.dataset.f,v=ch.dataset.v,st=gst("bookings"),onPend=(location.hash||"").slice(1)==="b-pend";
+  if(f==="status"&&onPend){if(v==="Pending")return;st.f.status=v;st.p=1;location.hash="#b-all";return}
+  const g=gst(onPend?"b-pend":"bookings");g.f[f]=v;g.p=1;show();return}
+ const t=e.target.closest('[data-a="stab"]');
+ if(t){stab=t.dataset.v;show();return}
+ const mi=e.target.closest(".mnu .mi");
+ if(mi){const d=mi.closest("details");if(d)d.open=false}
+ if(!e.target.closest(".mnu"))document.querySelectorAll(".mnu[open]").forEach(d=>d.open=false);
+});
+document.addEventListener("toggle",e=>{
+ const d=e.target;if(!d.classList||!d.classList.contains("mnu")||!d.open)return;
+ document.querySelectorAll(".mnu[open]").forEach(o=>{if(o!==d)o.open=false});
+ const r=d.querySelector("summary").getBoundingClientRect(),l=d.querySelector(".mnu-l");
+ l.style.top=Math.min(r.bottom+4,innerHeight-l.offsetHeight-8)+"px";
+ l.style.left=Math.max(8,r.right-l.offsetWidth)+"px";
+},true);
+addEventListener("scroll",()=>document.querySelectorAll(".mnu[open]").forEach(d=>d.open=false),true);
+document.addEventListener("submit",async e=>{
+ if(e.target.id!=="biz-form")return;
+ e.preventDefault();
+ const a=ld("content");
+ for(const inp of e.target.querySelectorAll("input[data-sec]")){
+  const sec=inp.dataset.sec,text=inp.value.trim(),ex=a.find(x=>x.section===sec);
+  if(ex)ex.text=text;else if(text)a.unshift({id:Date.now().toString(36)+sec.length,section:sec,text});
+ }
+ const r=await sv("content",a);if(!r.ok)return;
+ clearDirty();await DB.loadAdmin();Notice.toast("success","Business info saved.");show();
+});
+function prPreview(){
+ const dp=document.getElementById("set-dp"),mn=document.getElementById("set-mindp"),tr=document.getElementById("pr-try"),out=document.getElementById("pr-out");
+ if(!dp||!out)return;
+ const tot=Math.max(0,+tr.value||0),pct=Math.min(100,Math.max(0,+dp.value||0)),min=Math.max(0,+mn.value||0);
+ const down=Math.min(tot,Math.max(tot*pct/100,min));
+ const txt="Downpayment \u20B1"+down.toLocaleString(undefined,{maximumFractionDigits:2})+" \u00B7 Balance \u20B1"+(tot-down).toLocaleString(undefined,{maximumFractionDigits:2});
+ if(out.textContent!==txt)out.textContent=txt;
+}
+document.addEventListener("input",e=>{if(e.target.closest("#pay-sett-form"))prPreview()});
+new MutationObserver(prPreview).observe(document.body,{childList:true,subtree:true});
+prPreview();
 })();
+
+document.addEventListener("click",async e=>{const b=e.target.closest('[data-a="remind"]');if(!b)return;b.disabled=true;
+ try{const r=await DB.runReminders();
+  if(r.ok&&r.data&&r.data.reminders){const x=r.data.reminders;Notice.success("Reminders sent",x.sent+" reminder(s) sent, "+x.skipped+" skipped (already reminded or reminders turned off).")}
+  else Notice.warning("Reminders not sent",(r.data&&r.data.error)||"Please try again.")}
+ finally{b.disabled=false}});

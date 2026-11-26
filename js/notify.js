@@ -35,7 +35,7 @@ const Validate=(()=>{
   if(!inp.placeholder)inp.placeholder="09XXXXXXXXX or 639XXXXXXXXX";
   const c=document.createElement("div");c.className="bvn-count";c.id=(inp.id||"contact")+"-count";inp.insertAdjacentElement("afterend",c);
   inp.setAttribute("aria-describedby",((inp.getAttribute("aria-describedby")||"")+" "+c.id).trim());
-  const paint=()=>{const digits=inp.value.replace(/\D/g,"");const n=digits.length;c.textContent=n+" / 11–12";c.classList.toggle("ok",contact(inp.value));c.classList.toggle("over",n>12);
+  const paint=()=>{const digits=inp.value.replace(/\D/g,"");const n=digits.length;c.textContent=n?n+" digits"+(contact(inp.value)?" - looks good":""):"09XX XXX XXXX (11 digits) or 639XX XXX XXXX (12 digits)";c.classList.toggle("ok",contact(inp.value));c.classList.toggle("over",n>12);
    if(inp.getAttribute("aria-invalid")==="true"&&contact(inp.value))unflag(inp)};
   inp.addEventListener("beforeinput",e=>{   /* typed characters: block non-digits, and stop after 12 digits */
    if(e.inputType!=="insertText"||e.data==null)return;
@@ -65,9 +65,11 @@ const Notice=(()=>{
  /* look: the site's own colours and fonts. Every value falls back to the site palette on pages that do not define the variables. */
  const CSS=`
 html dialog.bvn{border:0;padding:0;margin:auto;background:transparent;max-width:none;width:min(500px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:visible;color:var(--ink,#20251F);font:400 1rem/1.6 Jost,system-ui,sans-serif;opacity:0;transform:translateY(14px) scale(.98);transition:opacity .26s ease,transform .32s cubic-bezier(.22,1,.36,1)}
-html dialog.bvn[open]{opacity:1;transform:none}
+html dialog.bvn[open]{animation:bvnpop .34s cubic-bezier(.22,1,.36,1)}   /* no opacity here: when .bvn-in is removed the base opacity:0 transition plays the fade-out */
+@keyframes bvnpop{from{opacity:0;transform:translateY(18px) scale(.94)}to{opacity:1;transform:none}}
+@keyframes bvnfade{from{opacity:0}to{opacity:1}}
 html dialog.bvn.bvn-in,html dialog.bvn.bvn-in[open]{opacity:1;transform:none}
-html dialog.bvn::backdrop,html dialog.bvn[open]::backdrop{background:rgba(20,39,28,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);opacity:1;transition:opacity .26s ease}
+html dialog.bvn::backdrop,html dialog.bvn[open]::backdrop{background:rgba(20,39,28,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);opacity:1;transition:opacity .26s ease;animation:bvnfade .26s ease}
 html dialog.bvn.bvn-in::backdrop{opacity:1}
 .bvn-card{--accent:#203A2A;--tint:#EDE5D6;position:relative;background:var(--iv,#F8F4EA);border:1px solid var(--gold,#C5A46D);border-top:3px solid var(--accent);border-radius:4px;padding:28px 28px 24px;box-shadow:0 24px 60px rgba(20,39,28,.35);max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain}
 .bvn-card[data-type=error]{--accent:#8a2f2f;--tint:#f6e4e0}.bvn-card[data-type=warning]{--accent:#8A6A28;--tint:#f1e2bd}
@@ -97,13 +99,15 @@ input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="tr
 input[aria-invalid="true"]:focus,select[aria-invalid="true"]:focus,textarea[aria-invalid="true"]:focus{box-shadow:0 0 0 3px rgba(138,47,47,.2)!important}
 /* toasts */
 .bvn-toasts{position:fixed;z-index:2147483000;inset:auto auto max(18px,env(safe-area-inset-bottom)) 50%;margin:0;padding:0;border:0;background:transparent;overflow:visible;height:auto;color:inherit;transform:translateX(-50%);width:min(440px,calc(100% - 24px));display:flex;flex-direction:column;gap:10px;pointer-events:none}.bvn-toasts:not(:popover-open){display:none}.bvn-toasts:not([popover]){display:flex}
-.bvn-toast{--accent:#203A2A;pointer-events:auto;display:flex;align-items:flex-start;gap:12px;background:var(--iv,#F8F4EA);color:var(--ink,#20251F);border:1px solid var(--gold,#C5A46D);border-left:4px solid var(--accent);border-radius:3px;padding:12px 8px 12px 14px;box-shadow:0 14px 34px rgba(20,39,28,.25);font:400 .95rem/1.5 Jost,system-ui,sans-serif;opacity:0;transform:translateY(10px);transition:opacity .25s ease,transform .3s cubic-bezier(.22,1,.36,1)}
+.bvn-toast{--accent:#203A2A;pointer-events:auto;display:flex;align-items:flex-start;gap:12px;background:var(--iv,#F8F4EA);color:var(--ink,#20251F);border:1px solid var(--accent);border-radius:3px;padding:12px 8px 12px 14px;box-shadow:0 14px 34px rgba(20,39,28,.25);font:400 .95rem/1.5 Jost,system-ui,sans-serif;opacity:0;transform:translateY(10px);transition:opacity .25s ease,transform .3s cubic-bezier(.22,1,.36,1)}
 .bvn-toast.in{opacity:1;transform:none}
+.bvn-toast{position:relative;overflow:hidden}.bvn-toast.in::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent);opacity:.55;transform-origin:left;animation:bvntimer var(--ms,4500ms) linear forwards}
+@keyframes bvntimer{to{transform:scaleX(0)}}.bvn-toast:hover::after{animation-play-state:paused}
 .bvn-toast[data-type=error]{--accent:#8a2f2f}.bvn-toast[data-type=warning]{--accent:#8A6A28}.bvn-toast[data-type=success]{--accent:#2f6a40}
 .bvn-toast .ti{flex:none;color:var(--accent);margin-top:1px}.bvn-toast .tm{flex:1;overflow-wrap:anywhere}
 .bvn-toast button{flex:none;background:none;border:0;width:36px;height:36px;display:grid;place-items:center;color:var(--mut,#4a5a4d);cursor:pointer;border-radius:2px}.bvn-toast button:hover{background:rgba(32,58,42,.07)}.bvn-toast button:focus-visible{outline:2px solid var(--gold,#C5A46D)}
 @media(max-width:520px){.bvn-card{padding:24px 20px 20px}.bvn-a{flex-direction:column-reverse}.bvn-b{width:100%}.bvn-d{grid-template-columns:1fr}.bvn-d dt{border-bottom:0;padding-bottom:0}}
-@media(prefers-reduced-motion:reduce){html dialog.bvn,html dialog.bvn::backdrop,.bvn-toast,.bvn-b{transition:none!important}.bvn-b .sp{animation-duration:1.6s}}`;
+@media(prefers-reduced-motion:reduce){.bvn-toast::after{animation:none!important}html dialog.bvn,html dialog.bvn::backdrop,.bvn-toast,.bvn-b{transition:none!important;animation:none!important}.bvn-b .sp{animation-duration:1.6s}}`;
 
  let dlg,card,els,cur=null,queue=[],tbox,uid=0;
  const key=o=>JSON.stringify([o.type,o.title,o.message,o.details||"",(o.actions||[]).map(a=>a.label)]);
@@ -269,14 +273,16 @@ input[aria-invalid="true"]:focus,select[aria-invalid="true"]:focus,textarea[aria
  function toast(type,message,ms){
   if(!tbox){build();tbox=document.createElement("div");tbox.className="bvn-toasts";tbox.setAttribute("role","region");tbox.setAttribute("aria-label","Notifications");tbox.setAttribute("popover","manual");document.body.appendChild(tbox)}
   const dup=[...tbox.children].find(t=>t.dataset.m===message&&t.dataset.type===type);if(dup)return;
-  while(tbox.children.length>=3)tbox.firstElementChild.remove();
+  while(tbox.children.length>=4)tbox.firstElementChild.remove();
   const t=document.createElement("div");t.className="bvn-toast";t.dataset.type=type;t.dataset.m=message;t.setAttribute("role",type==="error"?"alert":"status");
   t.innerHTML=`<span class="ti">${ICON[type]||ICON.info}</span><span class="tm"></span><button type="button" aria-label="Dismiss notification">${X}</button>`;
   t.querySelector(".tm").textContent=message;tbox.appendChild(t);try{tbox.hidePopover()}catch{}try{tbox.showPopover()}catch{}   /* top layer: stays above any open window */
   const rm=()=>{t.classList.remove("in");setTimeout(()=>t.remove(),REDUCED()?0:260)};
   t.querySelector("button").onclick=rm;
   requestAnimationFrame(()=>requestAnimationFrame(()=>t.classList.add("in")));
-  setTimeout(rm,ms||(type==="error"?8000:4500));
+  const life=ms||(type==="error"?12000:type==="warning"?9000:6000);t.style.setProperty("--ms",life+"ms");
+  let left=life,t0=Date.now(),to=setTimeout(rm,left);   /* hovering pauses the countdown, so a message can be read in peace */
+  t.onmouseenter=()=>{clearTimeout(to);left-=Date.now()-t0};t.onmouseleave=()=>{t0=Date.now();to=setTimeout(rm,left)};
  }
 
  try{window.alert=msg=>{toast("warning",String(msg))}}catch{}

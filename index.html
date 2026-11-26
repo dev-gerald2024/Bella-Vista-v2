@@ -16,23 +16,22 @@
     />
     <meta property="og:type" content="website" />
     <link rel="icon" href="assets/logo/logo.png" type="image/png" />
-    <script>
-      document.documentElement.classList.add("js");
-    </script>
+    <script src="js/boot.js"></script>
+    <link rel="stylesheet" href="css/fonts.css?v=m1" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@300;400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="css/style.css?v=20261113_refundtiming" />
+    <link rel="stylesheet" href="css/tokens.css?v=m1" />
+    <link rel="stylesheet" href="css/style.css?v=m1" />
   </head>
   <body data-page="home">
     <main id="main">
       <section class="hero" id="home">
         <div class="hbg"></div>
         <div class="wrap hc">
-          <span class="eb">Bella Vista Oasis Spa</span>
           <h1>
             <span>Experience</span>
             <span>the Art of</span>
@@ -55,27 +54,23 @@
       <section id="arrival">
         <div class="wrap">
           <div class="ar2 reveal">
-            <span class="eb">
-              A small moment
-              <br />
-              to yourself
-            </span>
-            <div>
-              <h2>Wellness is not something to rush through.</h2>
-              <p class="lead">
+            <h2>Wellness is not something to rush through.</h2>
+            <p class="lead">
                 Bella Vista Oasis Spa is a peaceful sanctuary on the Bella Vista estate, offering massage, therapeutic
                 treatments, and private lounge experiences for guests who want to slow down.
               </p>
-            </div>
           </div>
-          <div class="est reveal">Est. 2021</div>
+          <dl class="facts reveal">
+            <div><dt>Open</dt><dd data-fact="hours">Daily, 1:00 PM - 9:00 PM</dd></div>
+            <div><dt>Find us</dt><dd data-fact="address">Tagaytay City, Cavite</dd></div>
+            <div><dt>Between guests</dt><dd>We reset each room for 30 minutes, so nobody is rushed in or out.</dd></div>
+          </dl>
         </div>
       </section>
       <section id="services">
         <div class="wrap">
           <div class="sh reveal">
             <div>
-              <span class="eb">Treatments</span>
               <h2>Signature Treatments</h2>
             </div>
             <p class="lead">Rituals designed to restore balance, ease tension, and renew the senses.</p>
@@ -88,7 +83,6 @@
         <div class="wrap">
           <div class="sh reveal">
             <div>
-              <span class="eb">Suites</span>
               <h2>Stay in Stillness</h2>
             </div>
             <p class="lead">Private spaces designed for uninterrupted rest.</p>
@@ -103,10 +97,9 @@
             <div class="ph" data-wellness-photo role="img" aria-label="Wellness at Bella Vista Oasis Spa"></div>
           </div>
           <div class="reveal reveal-right">
-            <span class="eb">Wellness</span>
             <h2>The Bella Vista Approach</h2>
-            <p>Enjoy a peaceful wellness experience in a comfortable and relaxing environment.</p>
-            <a class="btn ghost" href="services.html#journey">Explore wellness</a>
+            <p>Every booking is matched to a room that fits your group, and a therapist is assigned before you arrive. You choose the treatment and the length; we handle the rest.</p>
+            <a class="btn ghost" href="wellness.html#journey">Explore wellness</a>
           </div>
         </div>
       </section>
@@ -114,7 +107,6 @@
         <div class="wrap">
           <div class="sh reveal">
             <div>
-              <span class="eb">Gallery</span>
               <h2>A glimpse of Bella Vista</h2>
             </div>
             <p class="lead">Moments from the spa and the estate.</p>
@@ -126,26 +118,11 @@
         <div class="wrap">
           <div class="sh reveal">
             <div>
-              <span class="eb">Guest reviews</span>
               <h2>Kind words from our guests</h2>
             </div>
             <p class="lead" id="rvs"></p>
           </div>
           <div class="rvg" id="rvg"></div>
-        </div>
-      </section>
-      <section class="amb" id="ambiance" aria-labelledby="ambt">
-        <div class="ambg" role="presentation"></div>
-        <div class="wrap reveal">
-          <span class="eb" style="color: var(--gold)">A quiet escape</span>
-          <h2 id="ambt">
-            Slow down.
-            <br />
-            Breathe deeper.
-            <br />
-            Feel restored.
-          </h2>
-          <a class="btn ghost" href="services.html">Discover treatments</a>
         </div>
       </section>
       <section class="cta dk" id="reserve">
@@ -163,11 +140,12 @@
         </div>
       </section>
     </main>
-    <script src="js/data.js?v=20261113_refundtiming"></script>
-    <script src="js/notify.js?v=20261113_refundtiming"></script>
-    <script src="js/auth.js?v=20261113_refundtiming"></script>
-    <script src="js/booking.js?v=20261113_refundtiming"></script>
-    <script src="js/main.js?v=20261113_refundtiming"></script>
+    <script src="js/phone.js?v=m1"></script>
+    <script src="js/data.js?v=m1"></script>
+    <script src="js/notify.js?v=m1"></script>
+    <script src="js/auth.js?v=m1"></script>
+    <script src="js/booking.js?v=m1"></script>
+    <script src="js/main.js?v=m1"></script>
     <script src="js/reviews.js"></script>
   </body>
 </html>

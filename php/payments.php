@@ -1,10 +1,9 @@
 <?php
 /**
- * BELLA VISTA OASIS SPA — PHASE 6.0 DEMO PAYMENT & TRANSACTION MANAGEMENT SYSTEM
- * SIMULATION ONLY — NO REAL MONEY TRANSFERRED.
+ * BELLA VISTA OASIS SPA — PAYMENT & TRANSACTION MANAGEMENT SYSTEM
  *
- * Provides downpayment calculation, simulated checkout, GCash/Maya/Bank Transfer/Cash at Spa
- * simulation, receipt generation, refund & forfeiture management, and transaction auditing.
+ * Provides downpayment calculation, checkout, GCash/Maya/Bank Transfer/Cash at Spa
+ * payments, receipt generation, refund & forfeiture management, and transaction auditing.
  */
 
 declare(strict_types=1);
@@ -26,6 +25,40 @@ function get_downpayment_setting(): float {
   return (float)(cfg('DOWNPAYMENT_PERCENTAGE') ?: 25.0);
 }
 
+/** Minimum downpayment in PHP: payment_settings first, then php/config.php, then 500. */
+function get_min_downpayment(): float {
+  $row = q1("SELECT setting_value FROM payment_settings WHERE setting_key = 'MIN_DOWNPAYMENT_AMOUNT'");
+  if ($row && is_numeric($row['setting_value'])) {
+    return (float)$row['setting_value'];
+  }
+  return (float)(cfg('MIN_DOWNPAYMENT_AMOUNT') ?: 500.0);
+}
+
+/**
+ * Single authoritative reader for yes/no payment settings.
+ * Uses the stored value when the row exists, otherwise $default. A missing row
+ * (fresh install) therefore behaves the same everywhere: server, API and admin UI.
+ */
+function payment_setting_enabled(string $key, bool $default = true): bool {
+  $row = q1('SELECT setting_value FROM payment_settings WHERE setting_key = ?', [$key]);
+  if (!$row || $row['setting_value'] === null || trim((string)$row['setting_value']) === '') {
+    return $default;
+  }
+  return !in_array(strtolower(trim((string)$row['setting_value'])), ['0', 'false', 'no', 'off'], true);
+}
+
+function full_payment_allowed(): bool {
+  return payment_setting_enabled('ALLOW_FULL_PAYMENT', true);
+}
+
+function late_forfeiture_enabled(): bool {
+  return payment_setting_enabled('FORFEIT_LATE_CANCELLATION', cfg('FORFEIT_LATE_CANCELLATION') !== false);
+}
+
+/* The bookings.payment_status column only stores UNPAID / PARTIALLY_PAID / PAID / REFUNDED / FORFEITED.
+   A partly refunded booking is still partly paid there; the API summary reports the finer PARTIALLY_REFUNDED. */
+function db_payment_status(string $s): string { return $s === 'PARTIALLY_REFUNDED' ? 'PARTIALLY_PAID' : $s; }
+
 function get_all_payment_settings(): array {
   $rows = qa('SELECT setting_key, setting_value, description FROM payment_settings');
   $map = [];
@@ -34,11 +67,10 @@ function get_all_payment_settings(): array {
   }
   return [
     'downpaymentPercentage' => isset($map['DOWNPAYMENT_PERCENTAGE']) ? (float)$map['DOWNPAYMENT_PERCENTAGE'] : (float)(cfg('DOWNPAYMENT_PERCENTAGE') ?: 25.0),
-    'minDownpaymentAmount'  => isset($map['MIN_DOWNPAYMENT_AMOUNT']) ? (float)$map['MIN_DOWNPAYMENT_AMOUNT'] : (float)(cfg('MIN_DOWNPAYMENT_AMOUNT') ?: 500.0),
-    'allowFullPayment'      => !empty($map['ALLOW_FULL_PAYMENT']),
-    'demoModeActive'        => true,
-    'forfeitLateCancel'     => !empty($map['FORFEIT_LATE_CANCELLATION']),
-    'disclaimer'            => cfg('DEMO_DISCLAIMER_TEXT') ?: 'DEMO PAYMENT — NO REAL MONEY WILL BE TRANSFERRED.'
+    'minDownpaymentAmount'  => get_min_downpayment(),
+    'allowFullPayment'      => full_payment_allowed(),
+    'forfeitLateCancel'     => late_forfeiture_enabled(),
+    'disclaimer'            => cfg('DEMO_DISCLAIMER_TEXT') ?: ''
   ];
 }
 
@@ -51,10 +83,17 @@ function update_payment_setting(string $key, string $value, string $adminName = 
    2. DOWNPAYMENT & REMAINING BALANCE CALCULATION
    ============================================================================ */
 
+/** The ONE downpayment formula (summary, booking quote and the confirmation all use it):
+ *  min(total, max(minimum, total * percentage)). */
+function required_downpayment(float $total): float {
+  $dp = round(max(get_min_downpayment(), $total * (get_downpayment_setting() / 100.0)), 2);
+  return min($dp, round($total, 2));
+}
+
 /**
  * Accurately calculates booking payment status, required downpayment, total paid, and remaining balance.
  * Formula:
- * Downpayment = Total Amount * Configured Downpayment Percentage
+ * Downpayment = min(Total, max(Minimum Downpayment, Total * Configured Percentage))
  * Remaining Balance = Total Amount - Confirmed Payments
  */
 function calculate_booking_payment_summary(int $bookingId): array {
@@ -73,14 +112,12 @@ function calculate_booking_payment_summary(int $bookingId): array {
       $totalAmount = get_service_price((string)$bk['service'], $dur, (int)($bk['guests'] ?? 1));
     }
     if ($totalAmount <= 0) {
-      $totalAmount = 800.00; // baseline service price in demo
+      $totalAmount = 800.00; // baseline service price
     }
   }
 
   $pct = get_downpayment_setting();
-  $minDp = (float)(cfg('MIN_DOWNPAYMENT_AMOUNT') ?: 500.0);
-  $dpRequired = round($totalAmount * ($pct / 100.0), 2);
-  if ($dpRequired > $totalAmount) $dpRequired = $totalAmount;
+  $dpRequired = required_downpayment($totalAmount);
 
   // Query transactions for this booking
   $txns = qa('SELECT * FROM transactions WHERE booking_id = ? ORDER BY id ASC', [$bookingId]);
@@ -125,7 +162,7 @@ function calculate_booking_payment_summary(int $bookingId): array {
 
   // Update booking record caches
   run('UPDATE bookings SET amount = ?, payment_status = ?, paid_amount = ?, downpayment_required = ? WHERE id = ?',
-    [$totalAmount, $payStatus, $netPaid, $dpRequired, $bookingId]);
+    [$totalAmount, db_payment_status($payStatus), $netPaid, $dpRequired, $bookingId]);
 
   return [
     'bookingId'            => $bookingId,
@@ -149,20 +186,19 @@ function calculate_booking_payment_summary(int $bookingId): array {
     'pendingAmount'        => $pendingPayments,
     'remainingBalance'     => $remainingBalance,
     'paymentStatus'        => $payStatus,
-    'allowFullPayment'     => (get_downpayment_setting('ALLOW_FULL_PAYMENT', '1') !== '0'),
+    'allowFullPayment'     => full_payment_allowed(),
     'isFullyPaid'          => ($remainingBalance <= 0.0 && $totalAmount > 0),
-    'demoMode'             => true,
-    'disclaimer'           => 'DEMO PAYMENT — NO REAL MONEY WILL BE TRANSFERRED.',
+    'disclaimer'           => '',
     'transactions'         => array_map('shape_txn', $txns)
   ];
 }
 
 /* ============================================================================
-   3. SIMULATED CHECKOUT & PAYMENT PROCESSING ENGINE
+   3. CHECKOUT & PAYMENT PROCESSING ENGINE
    ============================================================================ */
 
 /**
- * Processes a simulated demo payment.
+ * Processes a payment.
  * Supported methods: GCASH_DEMO, MAYA_DEMO, BANK_TRANSFER_DEMO, CASH_AT_SPA.
  * Supported types: DOWNPAYMENT, BALANCE_PAYMENT, FULL_PAYMENT.
  */
@@ -190,6 +226,17 @@ function process_demo_payment(
 
   $bk = q1('SELECT * FROM bookings WHERE id = ?', [$bookingId]);
   if (!$bk) fail('Booking not found.', 404);
+  $lock = booking_lock($bookingId);                       // one payment at a time per booking (double-click / two tabs)
+  $bk = q1('SELECT * FROM bookings WHERE id = ?', [$bookingId]);   // re-read now that we hold the lock
+  if (in_array($bk['status'], ['CANCELLED', 'REJECTED', 'NO-SHOW'], true)) {
+    fail('This reservation is ' . strtolower($bk['status']) . ' and can no longer be paid.', 409);
+  }
+
+  // Payment opens only after the spa confirms the appointment: a pending request can still be declined or clash with another
+  // booking, and the customer should not pay for a slot that may not be theirs.
+  if ($bk['status'] === 'PENDING') {
+    fail('Payment opens once the spa confirms your appointment. You will be notified.', 409, ['code' => 'awaiting_confirmation']);
+  }
 
   // Security: Customer ownership check
   if ($userId !== null) {
@@ -222,6 +269,9 @@ function process_demo_payment(
       fail('This appointment has already been paid in full. No remaining balance is due.', 400);
     }
   } else { // FULL_PAYMENT
+    if (!full_payment_allowed()) {
+      fail('Full payment is not available right now. Please pay the required downpayment.', 403);
+    }
     $payAmount = $summary['remainingBalance'];
     if ($payAmount <= 0) {
       fail('This appointment has already been paid in full.', 400);
@@ -237,8 +287,8 @@ function process_demo_payment(
 
   // Generate unique references
   $refSuffix = strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
-  $txnRef = 'TXN-DEMO-' . date('Ymd') . '-' . $refSuffix;
-  $recNum = 'REC-DEMO-' . date('Ymd') . '-' . $refSuffix;
+  $txnRef = 'TXN-' . date('Ymd') . '-' . $refSuffix;
+  $recNum = 'REC-' . date('Ymd') . '-' . $refSuffix;
 
   // Determine transaction status based on method and simulation scenario
   $simResult = strtoupper(trim($simulateResult));
@@ -250,40 +300,43 @@ function process_demo_payment(
     $status = 'FAILED';
     $recNum = null;
     $processedAt = null;
-    $txNotes = 'Simulated payment failure (Demo mode - test scenario). No money deducted.';
+    $txNotes = 'Payment failed. No money deducted.';
   } elseif ($simResult === 'CANCEL' || $simResult === 'CANCELLED') {
     $status = 'CANCELLED';
     $recNum = null;
     $processedAt = null;
-    $txNotes = 'Simulated checkout was cancelled by the customer.';
+    $txNotes = 'Checkout was cancelled by the customer.';
   } elseif ($method === 'CASH_AT_SPA') {
     // Cash at spa creates a PENDING bookkeeping record; money is NOT received until admin confirms
     $status = 'PENDING';
     $recNum = null;
     $processedAt = null;
-    $txNotes = 'Simulated Cash-at-Spa payment request. Pending front desk confirmation.';
+    $txNotes = 'Cash-at-Spa payment request. Pending front desk confirmation.';
   }
 
-  // Insert transaction record
-  run('INSERT INTO transactions (transaction_reference, user_id, booking_id, description, payment_method, amount, transaction_type, receipt_number, demo_mode, notes, processed_at, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NOW())',
-    [$txnRef, $bk['user_id'], $bookingId, $bk['service'], $method, $payAmount, $type, $recNum, $txNotes, $processedAt, $status]);
+  // Insert + summary + activity + audit in ONE transaction: any failure rolls everything back (the booking lock stays held until return)
+  [$txnId, $updatedSummary] = tx(function () use ($txnRef, $bk, $bookingId, $recNum, $method, $payAmount, $type, $txNotes, $processedAt, $status, $userId) {
+    run('INSERT INTO transactions (transaction_reference, user_id, booking_id, description, payment_method, amount, transaction_type, receipt_number, demo_mode, notes, processed_at, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NOW())',
+      [$txnRef, $bk['user_id'], $bookingId, $bk['service'], $method, $payAmount, $type, $recNum, $txNotes, $processedAt, $status]);
 
-  $txnId = last_id();
+    $txnId = last_id();
 
-  // If status is PAID, update booking summaries, notifications, and activity
-  if ($status === 'PAID') {
-    $updatedSummary = calculate_booking_payment_summary($bookingId);
-    if (!empty($bk['user_id'])) {
-      act((int)$bk['user_id'], "Demo payment: ₱" . number_format($payAmount, 2) . " via " . format_payment_method($method));
-      notify((int)$bk['user_id'], "Your simulated payment of ₱" . number_format($payAmount, 2) . " for " . $bk['service'] . " was successful. [DEMO: NO REAL MONEY TRANSFERRED]");
+    // If status is PAID, update booking summaries, notifications, and activity
+    if ($status === 'PAID') {
+      $updatedSummary = calculate_booking_payment_summary($bookingId);
+      if (!empty($bk['user_id'])) {
+        act((int)$bk['user_id'], "Payment: ₱" . number_format($payAmount, 2) . " via " . format_payment_method($method));
+        notify((int)$bk['user_id'], "Your payment of ₱" . number_format($payAmount, 2) . " for " . $bk['service'] . " was successful.");
+      }
+    } else {
+      $updatedSummary = calculate_booking_payment_summary($bookingId);
     }
-  } else {
-    $updatedSummary = calculate_booking_payment_summary($bookingId);
-  }
 
-  $actor = admin_actor() ?: ($userId ?: 1);
-  admin_log($actor, 'Demo payment processed', $txnRef, "Method: $method, Amount: ₱$payAmount, Status: $status, Booking: " . bk_ref($bk));
+    $actor = admin_actor() ?: ($userId ?: null);   // never a made-up user id: it must exist in `users` (clean installs have no user 1)
+    admin_log($actor, 'Payment processed', $txnRef, "Method: $method, Amount: ₱$payAmount, Status: $status, Booking: " . bk_ref($bk));
+    return [$txnId, $updatedSummary];
+  });
 
   $txnRow = q1('SELECT * FROM transactions WHERE id = ?', [$txnId]);
 
@@ -294,7 +347,7 @@ function process_demo_payment(
     'paymentSummary'     => $updatedSummary,
     'remainingBalance'   => $updatedSummary['remainingBalance'],
     'receipt'            => ($recNum !== null) ? generate_digital_receipt($txnId) : null,
-    'demoNotice'         => 'DEMO PAYMENT — NO REAL MONEY WILL BE TRANSFERRED.'
+    'demoNotice'         => ''
   ];
 }
 
@@ -303,9 +356,9 @@ function process_demo_payment(
  */
 function format_payment_method(string $method): string {
   return [
-    'GCASH_DEMO'         => 'GCash Demo',
-    'MAYA_DEMO'          => 'Maya Demo',
-    'BANK_TRANSFER_DEMO' => 'Bank Transfer Demo',
+    'GCASH_DEMO'         => 'GCash',
+    'MAYA_DEMO'          => 'Maya',
+    'BANK_TRANSFER_DEMO' => 'Bank Transfer',
     'CASH_AT_SPA'        => 'Cash at Spa'
   ][$method] ?? $method;
 }
@@ -325,13 +378,14 @@ function resolve_txn_id($ref): ?int {
 }
 
 /**
- * Builds a standardized digital demo payment receipt.
+ * Builds a standardized digital payment receipt.
  */
 function generate_digital_receipt(int $transactionId): ?array {
   $tx = q1('SELECT t.*, b.name AS customer_name, b.email AS customer_email, b.service AS service_name, 
-                   b.preferred_date, b.time, b.duration, b.guests, b.amount AS total_amount, b.created_at AS b_created
+                   b.preferred_date, b.time, b.duration, b.guests, b.amount AS total_amount, b.created_at AS b_created, pk.name AS package_name
             FROM transactions t
             JOIN bookings b ON b.id = t.booking_id
+            LEFT JOIN packages pk ON pk.id = b.package_id
             WHERE t.id = ?', [$transactionId]);
 
   if (!$tx || $tx['status'] !== 'PAID') return null;
@@ -346,12 +400,13 @@ function generate_digital_receipt(int $transactionId): ?array {
   $lockerPasscode = sprintf('%04d', (abs($passcodeHash) % 9000) + 1000);
 
   return [
-    'receiptNumber'       => $tx['receipt_number'] ?: ('REC-DEMO-' . pad($tx['id'])),
-    'transactionReference'=> $tx['transaction_reference'] ?: ('TXN-DEMO-' . pad($tx['id'])),
+    'receiptNumber'       => clean_ref($tx['receipt_number']) ?: ('REC-' . pad($tx['id'])),
+    'transactionReference'=> clean_ref($tx['transaction_reference']) ?: ('TXN-' . pad($tx['id'])),
     'customerName'        => $tx['customer_name'],
     'customerEmail'       => $tx['customer_email'],
     'bookingReference'    => 'BK-' . substr((string)$tx['b_created'], 0, 4) . '-' . pad($tx['booking_id']),
     'serviceName'         => $tx['service_name'],
+    'packageName'         => $tx['package_name'] ?? null,
     'guestCount'          => (int)$tx['guests'],
     'appointmentDate'     => $tx['preferred_date'],
     'appointmentTime'     => $tx['time'],
@@ -365,7 +420,7 @@ function generate_digital_receipt(int $transactionId): ?array {
     'lockerNumber'        => $lockerNum,
     'lockerPasscode'      => $lockerPasscode,
     'lockerPolicy'        => 'Per T&C 14, unique passcode changes combination after each booking.',
-    'disclaimer'          => 'DEMO PAYMENT RECEIPT — NO REAL MONEY WILL BE TRANSFERRED.'
+    'disclaimer'          => ''
   ];
 }
 
@@ -374,7 +429,7 @@ function generate_digital_receipt(int $transactionId): ?array {
    ============================================================================ */
 
 /**
- * Admin processes a simulated refund.
+ * Admin processes a refund.
  * Refund amount cannot exceed confirmed net paid payments.
  */
 function process_demo_refund(int $bookingId, float $amount, string $reason, string $adminName = 'Admin', ?string $refundMethod = null): array {
@@ -383,6 +438,7 @@ function process_demo_refund(int $bookingId, float $amount, string $reason, stri
 
   $amount = round($amount, 2);
   if ($amount <= 0) fail('Please enter a valid refund amount greater than zero.', 400);
+  $lock = booking_lock($bookingId);                       // two refunds at once must not exceed what was paid
 
   $summary = calculate_booking_payment_summary($bookingId);
   if ($amount > $summary['netPaid']) {
@@ -397,23 +453,26 @@ function process_demo_refund(int $bookingId, float $amount, string $reason, stri
 
   $methodLabel = format_payment_method($refundMethod);
   $refSuffix = strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
-  $txnRef = 'REF-DEMO-' . date('Ymd') . '-' . $refSuffix;
+  $txnRef = 'REF-' . date('Ymd') . '-' . $refSuffix;
   $recNum = 'REC-REFUND-' . date('Ymd') . '-' . $refSuffix;
-  $reasonText = clean_text($reason, 400) ?: 'Customer requested refund (Demo)';
+  $reasonText = clean_text($reason, 400) ?: 'Customer requested refund';
 
-  run('INSERT INTO transactions (transaction_reference, receipt_number, user_id, booking_id, description, payment_method, amount, transaction_type, demo_mode, refund_reason, processed_at, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), ?, NOW())',
-    [$txnRef, $recNum, $bk['user_id'], $bookingId, 'Refund via ' . $methodLabel . ': ' . $bk['service'], $refundMethod, $amount, 'REFUND', $reasonText, 'PAID']);
+  [$refundTxnId, $updatedSummary] = tx(function () use ($txnRef, $recNum, $bk, $bookingId, $methodLabel, $refundMethod, $amount, $reasonText, $adminName) {
+    run('INSERT INTO transactions (transaction_reference, receipt_number, user_id, booking_id, description, payment_method, amount, transaction_type, demo_mode, refund_reason, processed_at, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), ?, NOW())',
+      [$txnRef, $recNum, $bk['user_id'], $bookingId, 'Refund via ' . $methodLabel . ': ' . $bk['service'], $refundMethod, $amount, 'REFUND', $reasonText, 'PAID']);
 
-  $refundTxnId = last_id();
-  $updatedSummary = calculate_booking_payment_summary($bookingId);
+    $refundTxnId = last_id();
+    $updatedSummary = calculate_booking_payment_summary($bookingId);
 
-  admin_log(admin_actor(), 'Demo refund processed', $txnRef, "Refunded ₱$amount via $methodLabel for booking " . bk_ref($bk) . " (Reason: $reasonText)", $adminName);
+    admin_log(admin_actor(), 'Refund processed', $txnRef, "Refunded ₱$amount via $methodLabel for booking " . bk_ref($bk) . " (Reason: $reasonText)", $adminName);
 
-  if (!empty($bk['user_id'])) {
-    act((int)$bk['user_id'], "Demo refund processed: ₱" . number_format($amount, 2) . " via " . $methodLabel);
-    notify((int)$bk['user_id'], "A simulated demo refund of ₱" . number_format($amount, 2) . " has been credited immediately to your " . $methodLabel . " account. [DEMO: Processed instantly in 3 seconds]");
-  }
+    if (!empty($bk['user_id'])) {
+      act((int)$bk['user_id'], "Refund processed: ₱" . number_format($amount, 2) . " via " . $methodLabel);
+      notify((int)$bk['user_id'], "A refund of ₱" . number_format($amount, 2) . " has been credited immediately to your " . $methodLabel . " account.");
+    }
+    return [$refundTxnId, $updatedSummary];
+  });
 
   return [
     'ok'                 => true,
@@ -424,7 +483,7 @@ function process_demo_refund(int $bookingId, float $amount, string $reason, stri
     'formattedAmount'    => '₱' . number_format($amount, 2),
     'paymentMethod'      => $refundMethod,
     'paymentMethodLabel' => $methodLabel,
-    'estimatedTime'      => 'Instant (Demo Mode - 3s)',
+    'estimatedTime'      => 'Instant',
     'paymentSummary'     => $updatedSummary
   ];
 }
@@ -432,34 +491,42 @@ function process_demo_refund(int $bookingId, float $amount, string $reason, stri
 /**
  * Enforces the 24-hour cancellation policy: late cancellations forfeit downpayment.
  */
-function forfeit_demo_downpayment(int $bookingId, string $reason = 'Late cancellation (< 24h notice)', string $adminName = 'Admin'): void {
+function forfeit_demo_downpayment(int $bookingId, string $reason = 'Late cancellation (< 24h notice)', string $adminName = 'Admin'): bool {
   $bk = q1('SELECT * FROM bookings WHERE id = ?', [$bookingId]);
-  if (!$bk) return;
+  if (!$bk) return false;
+  $lock = booking_lock($bookingId);
 
-  // Mark all downpayment transactions as forfeited
-  run("UPDATE transactions SET status = 'FORFEITED', notes = CONCAT(COALESCE(notes,''), ' [FORFEITED: ', ?, ']') 
-       WHERE booking_id = ? AND transaction_type = 'DOWNPAYMENT' AND status = 'PAID'", [$reason, $bookingId]);
-
-  run("UPDATE bookings SET payment_status = 'FORFEITED' WHERE id = ?", [$bookingId]);
-
-  admin_log(admin_actor(), 'Downpayment forfeited', bk_ref($bk), "Forfeited simulated downpayment due to policy: $reason", $adminName);
+  // Only money that was really paid and not refunded can be forfeited. An unpaid booking, a refunded one and one
+  // that was already forfeited are left exactly as they are (this also makes a repeated call harmless).
+  if (calculate_booking_payment_summary($bookingId)['netPaid'] <= 0) return false;
+  return tx(function () use ($bookingId, $reason, $bk, $adminName) {
+    $n = run("UPDATE transactions SET status = 'FORFEITED', notes = CONCAT(COALESCE(notes,''), ' [FORFEITED: ', ?, ']')
+              WHERE booking_id = ? AND transaction_type = 'DOWNPAYMENT' AND status = 'PAID'", [$reason, $bookingId])->rowCount();
+    if ($n < 1) return false;
+    run("UPDATE bookings SET payment_status = 'FORFEITED' WHERE id = ?", [$bookingId]);
+    admin_log(admin_actor(), 'Downpayment forfeited', bk_ref($bk), "Forfeited downpayment due to policy: $reason", $adminName);
+    return true;
+  });
 }
 
-/**
- * Admin marks a pending Cash-at-Spa payment as PAID.
- */
 function admin_confirm_cash_payment(int $transactionId, string $adminName = 'Admin'): array {
   $tx = q1("SELECT * FROM transactions WHERE id = ? AND payment_method = 'CASH_AT_SPA' AND status = 'PENDING'", [$transactionId]);
   if (!$tx) fail('Pending cash transaction not found.', 404);
+  $lock = booking_lock((int)$tx['booking_id']);
+  $tx = q1("SELECT * FROM transactions WHERE id = ? AND payment_method = 'CASH_AT_SPA' AND status = 'PENDING'", [$transactionId]);
+  if (!$tx) fail('This cash payment was already confirmed or cancelled.', 409);
 
   $refSuffix = strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
-  $recNum = 'REC-DEMO-' . date('Ymd') . '-' . $refSuffix;
+  $recNum = 'REC-' . date('Ymd') . '-' . $refSuffix;
 
-  run("UPDATE transactions SET status = 'PAID', receipt_number = ?, processed_at = NOW(), notes = CONCAT(COALESCE(notes,''), ' [Confirmed by ', ?, ']') WHERE id = ?",
-    [$recNum, $adminName, $transactionId]);
+  $summary = tx(function () use ($recNum, $adminName, $transactionId, $tx) {
+    run("UPDATE transactions SET status = 'PAID', receipt_number = ?, processed_at = NOW(), notes = CONCAT(COALESCE(notes,''), ' [Confirmed by ', ?, ']') WHERE id = ?",
+      [$recNum, $adminName, $transactionId]);
 
-  $summary = calculate_booking_payment_summary((int)$tx['booking_id']);
-  admin_log(admin_actor(), 'Cash payment confirmed', $tx['transaction_reference'] ?: ('TXN-' . $tx['id']), "Confirmed cash payment ₱{$tx['amount']} for booking #{$tx['booking_id']}", $adminName);
+    $summary = calculate_booking_payment_summary((int)$tx['booking_id']);
+    admin_log(admin_actor(), 'Cash payment confirmed', $tx['transaction_reference'] ?: ('TXN-' . $tx['id']), "Confirmed cash payment ₱{$tx['amount']} for booking #{$tx['booking_id']}", $adminName);
+    return $summary;
+  });
 
   return [
     'ok'             => true,
@@ -500,7 +567,7 @@ function get_payment_analytics(): array {
     'fullyPaidBookings'      => $fullyPaidBks,
     'partiallyPaidBookings'  => $partPaidBks,
     'unpaidBookings'         => $unpaidBks,
-    'disclaimer'             => 'SIMULATED PAYMENT TOTALS — NOT ACTUAL REVENUE',
+    'disclaimer'             => '',
     'settings'               => get_all_payment_settings()
   ];
 }

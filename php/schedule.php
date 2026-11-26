@@ -30,17 +30,70 @@ function spa_hours(string $date): ?array {
   return $c > $o ? [$o, $c] : null;
 }
 
-/* Service duration configuration lookup */
+/* ---- Service configuration: ONE authoritative source for "which services can be booked, for how long, at what price" ----
+   1. php/config.php SERVICE_DURATIONS holds the built-in services.
+   2. The admin dashboard (Website > Services) can add a service or change a built-in one by filling "Durations", "Prices" and
+      "Available for booking" (stored in the content table). Admin values win over the built-in ones.
+   The server, the availability list, the price and the booking form all read this one function. */
+function parse_service_options(string $durations, string $prices): ?array {   // "60, 90" + "800, 1,100" -> [options, prices] or null when invalid
+  $d = preg_split('/[\s,;]+/', trim($durations), -1, PREG_SPLIT_NO_EMPTY);
+  // Prices: items are separated by spaces, ";" or ",". A well-formed group with a comma inside ("1,100", "12,500") is read as
+  // a thousands separator when that gives one price per duration; otherwise every comma separates prices. So
+  // "60, 90" + "800, 1,100" and "60, 90" + "800,900" both work, and "60" + "1,100" is 1100.
+  $clean = trim(str_replace(['₱', 'PHP', 'php'], '', $prices));
+  $split = function (bool $thousands) use ($clean): array {
+    $out = [];
+    foreach (preg_split('/[\s;]+/', $clean, -1, PREG_SPLIT_NO_EMPTY) as $chunk) {
+      if ($thousands && preg_match('/^\d{1,3}(,\d{3})+(\.\d+)?$/D', $chunk)) { $out[] = str_replace(',', '', $chunk); continue; }
+      foreach (explode(',', $chunk) as $part) if ($part !== '') $out[] = $part;
+    }
+    return $out;
+  };
+  $p = $split(true);
+  if ($d && count($p) !== count($d)) $p = $split(false);
+  if (!$d || count($d) > 6 || count($d) !== count($p)) return null;
+  $opts = []; $pr = [];
+  foreach ($d as $i => $m) {
+    if (!ctype_digit($m) || (int)$m < 15 || (int)$m > 480 || isset($pr[(int)$m])) return null;
+    if (!is_numeric($p[$i]) || (float)$p[$i] <= 0 || (float)$p[$i] > 100000) return null;
+    $opts[] = (int)$m; $pr[(int)$m] = round((float)$p[$i], 2);
+  }
+  return [$opts, $pr];
+}
+function service_admin_overrides(bool $refresh = false): array {   // name => ['options'=>[..], 'prices'=>[min=>price], 'active'=>bool]
+  static $cache = null; if ($cache !== null && !$refresh) return $cache;
+  $cache = [];
+  try {
+    $r = q1('SELECT json FROM content WHERE content_key=?', ['services']);
+    foreach (jparse($r['json'] ?? '[]', []) as $x) {
+      if (!is_array($x) || !is_string($x['name'] ?? null) || trim($x['name']) === '') continue;
+      $o = ['active' => strtolower(trim((string)($x['active'] ?? 'yes'))) !== 'no'];
+      $po = parse_service_options((string)($x['durations'] ?? ''), (string)($x['prices'] ?? ''));
+      if ($po) { $o['options'] = $po[0]; $o['prices'] = $po[1]; }
+      $cache[trim($x['name'])] = $o;
+    }
+  } catch (Throwable $e) { /* content table unavailable: built-in services only */ }
+  return $cache;
+}
+function service_is_active(string $service): bool { return service_admin_overrides()[$service]['active'] ?? true; }
 function service_duration_config(string $service): ?array {
   $durations = cfg('SERVICE_DURATIONS');
-  if (!is_array($durations)) return null;
-  return $durations[$service] ?? null;
+  $conf = is_array($durations) ? ($durations[$service] ?? null) : null;
+  $ov = service_admin_overrides()[$service] ?? null;
+  if ($ov && !empty($ov['options'])) {
+    $o = $ov['options'];
+    $conf = ['min' => min($o), 'max' => max($o), 'options' => $o, 'prices' => $ov['prices'], 'default' => $o[0], 'source' => 'admin'];
+  }
+  return $conf;
 }
 
 /* Validate service and selected duration.
    Rejects services without management duration config (e.g. 'Other Spa Treatments', 'Not sure yet').
    Returns ['ok' => true, 'minutes' => int] or ['ok' => false, 'error' => string, 'code' => string]. */
 function validate_service_duration(string $service, $duration, bool $requireDuration = true): array {
+  if (!service_is_active($service)) {
+    return ['ok' => false, 'error' => "$service is not available for booking right now.", 'code' => 'inactive_service', 'field' => 'interest'];
+  }
   $conf = service_duration_config($service);
   if (!$conf) {
     return [
@@ -73,12 +126,15 @@ function validate_service_duration(string $service, $duration, bool $requireDura
   }
 
   $durInt = (int)$duration;
-  $allowedOptions = (array)($conf['options'] ?? [$conf['min'], $conf['max']]);
-  if (!in_array($durInt, $allowedOptions, true) && ($durInt < $conf['min'] || $durInt > $conf['max'])) {
-    $optsStr = implode(', ', $allowedOptions);
+  // Only the listed options are bookable. A range is accepted only when a service has no list AND is explicitly marked 'continuous'.
+  $allowedOptions = array_map('intval', (array)($conf['options'] ?? []));
+  $continuous = !$allowedOptions && !empty($conf['continuous']);
+  $okDur = $continuous ? ($durInt >= $conf['min'] && $durInt <= $conf['max']) : in_array($durInt, $allowedOptions, true);
+  if (!ctype_digit(trim((string)$duration)) || !$okDur) {
+    $optsStr = implode(', ', $allowedOptions ?: [$conf['min'] . '-' . $conf['max']]);
     return [
       'ok' => false,
-      'error' => "Invalid duration for $service ($durInt min). Valid options: {$optsStr} minutes (range {$conf['min']}–{$conf['max']} min).",
+      'error' => "Invalid duration for $service (" . trim((string)$duration) . " min). Choose one of: {$optsStr} minutes.",
       'code' => 'invalid_duration',
       'field' => 'duration'
     ];
@@ -120,13 +176,8 @@ function validate_guests($guests): array {
  */
 function get_service_price(string $service, int $durationMinutes, int $guests = 1): float {
   $conf = service_duration_config($service);
-  $base = 800.0;
-  if ($conf && !empty($conf['prices']) && isset($conf['prices'][$durationMinutes])) {
-    $base = (float)$conf['prices'][$durationMinutes];
-  } elseif ($conf && !empty($conf['prices']) && isset($conf['default'], $conf['prices'][$conf['default']])) {
-    $base = (float)$conf['prices'][$conf['default']];
-  }
-  return round($base * max(1, $guests), 2);
+  if (!$conf || empty($conf['prices']) || !isset($conf['prices'][$durationMinutes])) return 0.0;   // no price configured: the caller must refuse
+  return round((float)$conf['prices'][$durationMinutes] * max(1, $guests), 2);
 }
 
 function local_now_minutes(): int {
@@ -280,7 +331,7 @@ function guard_slot(string $date, string $time, string $service, ?string $durati
   return with_day_lock($date, function () use ($date, $time, $service, $duration, $excludeId, $customer, $then, $userId) {
     $e = slot_error($date, $time, $service, $duration, $excludeId, $customer, null, $userId);
     if ($e) slot_fail($e);
-    return $then();
+    return tx($then);      // booking, room, cleaning and payment rows are saved together or not at all
   });
 }
 

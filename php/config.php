@@ -104,17 +104,21 @@ $config = [
      'ADDITIVE': Booking amount = Treatment price + Package price. */
   'PACKAGE_PRICING_RELATIONSHIP' => 'INDEPENDENT',
 
-  /* ---- Phase 6.0 Demo Payment & Transaction System ----
-     SIMULATION ONLY — NO REAL MONEY TRANSFERRED.
-     Configurable downpayment percentage, minimum downpayment amount,
-     and demo mode settings. */
+  /* ---- Payment & Transaction System ----
+     Configurable downpayment percentage, minimum downpayment amount
+     and payment settings. */
   'DEMO_PAYMENT_MODE'          => true,
-  'DOWNPAYMENT_PERCENTAGE'     => 25, // default demo downpayment percentage (25%)
-  'MIN_DOWNPAYMENT_AMOUNT'     => 500.0, // minimum demo downpayment in PHP
-  'FORFEIT_LATE_CANCELLATION'  => true, // late cancellations (< 24h) forfeit demo downpayment
-  'DEMO_DISCLAIMER_TEXT'       => 'DEMO PAYMENT — NO REAL MONEY WILL BE TRANSFERRED.',
+  'DOWNPAYMENT_PERCENTAGE'     => 25, // default downpayment percentage (25%)
+  'MIN_DOWNPAYMENT_AMOUNT'     => 500.0, // minimum downpayment in PHP
+  'FORFEIT_LATE_CANCELLATION'  => true, // late cancellations (< 24h) forfeit downpayment
+  'DEMO_DISCLAIMER_TEXT'       => '',
 
   /* ---- email (verification + password reset). Leave SMTP_URL empty to run without email. ---- */
+  /* Rate limiting (login, registration, password reset) stores counters in data/ratelimit.
+     If no folder is writable those actions are refused with a clear message instead of silently losing protection.
+     RATE_LIMIT_FAIL_OPEN => true lets them continue anyway (only for local testing, knowingly). RATE_LIMIT_DIR => '' uses the defaults. */
+  'RATE_LIMIT_FAIL_OPEN' => false,
+  'RATE_LIMIT_DIR'       => '',
   'SMTP_URL'   => '',
   'MAIL_FROM'  => 'Bella Vista Oasis Spa <no-reply@localhost>',
   'NOTIFY_EMAIL' => '',
@@ -122,6 +126,11 @@ $config = [
   /* Local development only: with no SMTP, write emails to data/mail.log so you can copy the
      verify / reset link out of it. Ignored when PRODUCTION is true. */
   'DEV_MAIL_TO_LOG' => true,
+
+  /* Offline use: show the password-reset link on the Forgot password page when there is no email server, so a forgotten
+     password can be fixed without email or opening data/mail.log. Automatically OFF when PRODUCTION is true or SMTP_URL is set.
+     Set to false if other people can reach this site: anyone who knows an email address could then reset that account. */
+  'OFFLINE_RESET_ON_SCREEN' => true,
 ];
 
 $localConfigFile = __DIR__ . '/config.local.php';

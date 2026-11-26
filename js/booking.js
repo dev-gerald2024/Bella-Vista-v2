@@ -31,12 +31,21 @@ async function initBooking(){
   if(whoEl) whoEl.textContent="Signed in as "+(s.user.fullName||"Guest")+" ("+s.user.email+")";
 
   const phoneField=document.getElementById("phone");
-  if(phoneField) formatPhoneInput(phoneField);
+  let savedPhone=s.user.phone||"";   // the number saved on the profile is filled in for the customer; it can be changed for this booking
+  const prefillPhone=()=>{if(phoneField&&savedPhone&&!phoneField.value)phoneField.value=savedPhone;if(phoneField)formatPhoneInput(phoneField)};
+  prefillPhone();
 
   // Populate treatment dropdown
   interest.innerHTML='<option value="">-- Choose a Treatment --</option>'+
-    CONFIG.services.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("");
+    CONFIG.services.filter(x=>x.durations&&x.durations.length).map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")+
+    '<option value="" disabled>Other treatments: please contact the spa</option>';
 
+  // Packages (room-type rate cards): the package of the chosen room's type is sent with the booking and shown in the summary
+  let PKG={list:[],mode:"INDEPENDENT"};
+  fetch("api/packages",{credentials:"same-origin"}).then(r=>r.ok?r.json():null).then(d=>{if(d&&d.packages){PKG.list=d.packages;PKG.mode=d.pricingRelationship||"INDEPENDENT";updateLiveSummary()}}).catch(()=>{});
+  let quoteTotal=0;
+  const peso=n=>"₱"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  function pkgForRoom(){const c=activeSelectedRoom&&activeSelectedRoom.categoryCode;const g=parseInt(guests.value,10)||1;return PKG.list.find(p=>p.category_code===c&&g>=Number(p.min_guests)&&g<=Number(p.max_capacity))||null}
   // Track room state
   let currentRecData = null;
   let activeSelectedRoom = null; // object { id, roomCode, name, ... }
@@ -82,7 +91,8 @@ async function initBooking(){
     if(sumDur) sumDur.textContent=durVal?(durVal+" minutes"):"—";
     if(sumGuests) sumGuests.textContent=gVal+(gVal===1?" Guest":" Guests");
     if(sumRoom){
-      sumRoom.textContent=activeSelectedRoom?(activeSelectedRoom.name||activeSelectedRoom.roomCode):"Executive Room 1 (SR-1)";
+      const pk=pkgForRoom();
+      sumRoom.textContent=(activeSelectedRoom?(activeSelectedRoom.name||activeSelectedRoom.roomCode):"-")+(pk?" · Package: "+pk.name:"");
     }
     if(sumSched){
       if(dVal&&tVal){
@@ -113,14 +123,29 @@ async function initBooking(){
     if(svc&&dur&&svc.prices&&svc.prices[dur]){
       const unitPrice=svc.prices[dur];
       const total=unitPrice*gVal;
-      if(disp) disp.textContent="₱"+total.toLocaleString()+".00";
-      if(bd) bd.textContent=`${selName} (${dur} min) @ ₱${unitPrice.toLocaleString()} × ${gVal} ${gVal===1?'guest':'guests'}`;
+      const pk=pkgForRoom();
+      let pkAdd=0,pkNote="";
+      if(pk&&PKG.mode==="ADDITIVE"){const std=Number(pk.standard_capacity),ex=Math.max(0,gVal-std);pkAdd=Number(pk.base_price)+(ex&&Number(pk.additional_guest_price)>0?ex*Number(pk.additional_guest_price):0);pkNote=` + ${pk.name} package ₱${pkAdd.toLocaleString()}`}
+      quoteTotal=total+pkAdd;
+      if(disp) disp.textContent=peso(quoteTotal);
+      if(bd) bd.textContent=`${selName} (${dur} min) @ ₱${unitPrice.toLocaleString()} × ${gVal} ${gVal===1?'guest':'guests'}`+pkNote+``;
     }else{
-      if(disp) disp.textContent="₱0.00";
+      quoteTotal=0;
+      if(disp) disp.textContent="-";
       if(bd) bd.textContent="Select a treatment and duration to view official rate.";
     }
   }
 
+  function roomMsg(title,reason){
+    const set=(id,t)=>{const e=document.getElementById(id);if(e)e.textContent=t};
+    activeSelectedRoom=null;
+    ["selectedRoomCode","selectedRoomId"].forEach(id=>{const e=document.getElementById(id);if(e)e.value=""});
+    set("recRoomName",title);set("recRoomDesc","");set("recRoomCap","-");set("recRoomRate","-");set("recRoomReason",reason);
+    const p=document.getElementById("recRoomStatus");if(p)p.hidden=true;
+    const b=document.getElementById("roomRecBox");if(b){b.classList.remove("selected");b.removeAttribute("role");b.removeAttribute("tabindex");b.onclick=b.onkeydown=null;const g=b.querySelector(".room-rec-badge");if(g)g.textContent="Suite"}
+    const a=document.getElementById("altRoomsSection");if(a)a.style.display="none";
+    updateLiveSummary();
+  }
   let recSeq=0;
   async function updateRoomRecommendations(){
     const svc=interest.value;
@@ -142,16 +167,19 @@ async function initBooking(){
       if(r.ok&&r.data){
         currentRecData=r.data;
         renderRooms(r.data);
+      }else{
+        roomMsg("Suite suggestions are unavailable right now","You can still send your request: the spa will assign the best free suite.");
       }
     }catch(err){
       console.error("Room recommendation error:",err);
+      roomMsg("Suite suggestions are unavailable right now","You can still send your request: the spa will assign the best free suite.");
     }
     updateLiveSummary();
   }
 
   function renderRooms(data){
     const rec=data.recommended;
-    if(!rec)return;
+    if(!rec){roomMsg("No suite is free for these details","Please try another date, time or number of guests.");return}
 
     const g=parseInt(guests.value,10)||1;
     // Keep active selection if it still fits the current guest count; otherwise re-default to recommended
@@ -178,6 +206,7 @@ async function initBooking(){
 
     if(recNameEl) recNameEl.textContent=rec.name;
     if(recStatusEl){
+      recStatusEl.hidden=false;
       const stClass=rec.isAvailable?"available":(rec.availabilityStatus==="MAINTENANCE"?"maintenance":"occupied");
       const stLabel=rec.isAvailable?"Available":(rec.availabilityStatus==="MAINTENANCE"?"Maintenance":"Occupied");
       recStatusEl.className="room-status-pill "+stClass;
@@ -195,9 +224,9 @@ async function initBooking(){
     // Recommendation card interaction / active styling
     if(recBox){
       const isRecSelected=(activeSelectedRoom.id===rec.id);
-      recBox.style.outline=isRecSelected?"2px solid var(--forest)":"none";
-      recBox.style.cursor="pointer";
-      recBox.title=isRecSelected?"Currently selected recommended suite":"Click to select this recommended suite";
+      recBox.classList.toggle("selected",isRecSelected);
+      recBox.setAttribute("role","button");recBox.tabIndex=0;recBox.setAttribute("aria-pressed",String(isRecSelected));
+      const bdg=recBox.querySelector(".room-rec-badge");if(bdg)bdg.textContent=isRecSelected?"✓ Your suite (recommended)":"Recommended suite: tap to choose";
       recBox.onclick=()=>{
         activeSelectedRoom=rec;
         if(selCodeEl) selCodeEl.value=rec.roomCode;
@@ -205,6 +234,7 @@ async function initBooking(){
         renderRooms(currentRecData);
         updateLiveSummary();
       };
+      recBox.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();recBox.click()}};
     }
 
     // Alternative eligible rooms
@@ -221,7 +251,7 @@ async function initBooking(){
           const isSel=(activeSelectedRoom.id===a.id);
           const stClass=a.isAvailable?"available":(a.availabilityStatus==="MAINTENANCE"?"maintenance":"occupied");
           const stLabel=a.isAvailable?"Available":(a.availabilityStatus==="MAINTENANCE"?"Maintenance":"Occupied");
-          return `<div class="alt-room-card ${isSel?'selected':''}" data-id="${a.id}" data-code="${esc(a.roomCode)}" style="position:relative">
+          return `<div class="alt-room-card ${isSel?'selected':''}" data-id="${a.id}" data-code="${esc(a.roomCode)}" role="button" tabindex="0" aria-pressed="${isSel}" style="position:relative">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <strong style="color:var(--forest);font-size:.92rem">${esc(a.name)}</strong>
               <span class="room-status-pill ${stClass}" style="font-size:.68rem;padding:2px 8px">${stLabel}</span>
@@ -231,11 +261,12 @@ async function initBooking(){
               <span>Capacity: <b>${esc(a.capacityText)}</b></span>
               <span>${esc(a.rateText)}</span>
             </div>
-            ${isSel?'<div style="margin-top:6px;font-size:.76rem;color:var(--forest);font-weight:600">✓ Selected Alternative Suite</div>':'<div style="margin-top:6px;font-size:.74rem;color:#7a6b52">Click to select suite</div>'}
+            ${isSel?'<div style="margin-top:6px;font-size:.76rem;color:var(--forest);font-weight:600">✓ Your suite</div>':'<div style="margin-top:6px;font-size:.74rem;color:#7a6b52">Tap to choose this suite</div>'}
           </div>`;
         }).join("");
 
         altList.querySelectorAll(".alt-room-card").forEach(card=>{
+          card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();card.click();const k=altList.querySelector(".alt-room-card.selected");if(k)k.focus()}};   /* the list is redrawn on select: keep the keyboard place */
           card.onclick=()=>{
             const rId=parseInt(card.getAttribute("data-id"),10);
             const found=alts.find(x=>x.id===rId);
@@ -256,7 +287,18 @@ async function initBooking(){
   if(pre&&CONFIG.services.some(x=>x.name===pre)){
     interest.value=pre;
   }
-  updateDurationOptions();
+  // The customer's last booking: treatment, length and special notes are filled in again (all still editable).
+  // A treatment chosen on the Services page (?service=) always wins.
+  let last=null;
+  try{const lr=await Auth.api("/api/bookings/last",null,"GET");if(lr.ok&&lr.data&&lr.data.last)last=lr.data.last}catch(e){}
+  const applyLast=()=>{
+    if(!last){updateDurationOptions();return}
+    if(!interest.value&&CONFIG.services.some(x=>x.name===last.service))interest.value=last.service;
+    updateDurationOptions();
+    if(interest.value===last.service&&last.duration&&[...duration.options].some(o=>o.value===String(last.duration)))duration.value=String(last.duration);
+    if(f.msg&&!f.msg.value&&last.message)f.msg.value=last.message;
+  };
+  applyLast();   // also builds the length list
   updateRoomRecommendations();
 
   const L=new Date();
@@ -268,8 +310,13 @@ async function initBooking(){
     return(h%12||12)+":"+String(m).padStart(2,"0")+" "+(h<12?"AM":"PM");
   };
 
+  const grid=document.createElement("div");grid.className="slot-grid";grid.setAttribute("role","group");grid.setAttribute("aria-label","Available times");
+  tm.insertAdjacentElement("afterend",grid);
+  const syncSlots=()=>grid.querySelectorAll(".slot").forEach(b=>{const on=!!tm.value&&b.dataset.t===tm.value;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on))});
+  grid.addEventListener("click",e=>{const b=e.target.closest(".slot");if(!b||b.disabled)return;tm.value=b.dataset.t;tm.closest(".f").classList.remove("bad");tm.dispatchEvent(new Event("change"));syncSlots()});
   let seq=0;
   async function loadSlots(keep){
+    grid.innerHTML="";tm.closest(".f").classList.remove("has-slots");tm.removeAttribute("tabindex");tm.removeAttribute("aria-hidden");
     const d=dt.value;
     const svc=interest.value;
     const dur=duration.value;
@@ -310,10 +357,15 @@ async function initBooking(){
     }
     const free=a.slots.filter(x=>x.free);
     tm.innerHTML='<option value="">'+(free.length?"Choose an appointment time":"Fully booked on this date")+"</option>"+
-      a.slots.map(x=>`<option value="${x.time}"${x.free?"":" disabled"}>${f12(x.time)}${x.free?"":" (fully booked / sanitizing)"}</option>`).join("");
-    if(hint) hint.textContent="Operating hours: "+f12(a.opens)+" to "+f12(a.closes)+
-      ". Treatment: "+a.minutes+" min (+ 30-min sanitization). Both treatment & cleaning finish by "+f12(a.closes)+".";
+      a.slots.map(x=>`<option value="${x.time}"${x.free?"":" disabled"}>${f12(x.time)}${x.free?"":" (unavailable)"}</option>`).join("");
+    const taken=a.slots.length-free.length;
+    if(hint) hint.textContent=(taken?taken+" of "+a.slots.length+" start times are unavailable (booked, or the room is being cleaned). ":"")+"Open "+f12(a.opens)+" to "+f12(a.closes)+". Your "+a.minutes+"-minute treatment plus 30 minutes of room cleaning must finish by closing time.";
+    if(free.length){
+      a.slots.forEach(x=>{const b=document.createElement("button");b.type="button";b.className="slot";b.dataset.t=x.time;b.textContent=f12(x.time);if(!x.free){b.disabled=true;b.title="Not available"}grid.appendChild(b)});
+      tm.closest(".f").classList.add("has-slots");tm.tabIndex=-1;tm.setAttribute("aria-hidden","true");
+    }
     if(keep&&free.some(x=>x.time===keep))tm.value=keep;
+    syncSlots();
   }
 
   dt.addEventListener("change",()=>{loadSlots();updateRoomRecommendations();updateLiveSummary();});
@@ -375,15 +427,22 @@ async function initBooking(){
     flag(agreeTermsBox,!agreeTermsBox||!agreeTermsBox.checked,"You must review and accept the Terms and Conditions to proceed.");
 
     if(!ok){
-      if(firstBad)firstBad.focus();
+      if(firstBad)(firstBad===tm&&grid.querySelector(".slot:not([disabled])")||firstBad).focus();
       return;
     }
 
-    const svc = CONFIG.services.find(x => x.name === svcVal);
-    const durNum = parseInt(durVal, 10) || 60;
-    const unitPrice = (svc && svc.prices && svc.prices[durNum]) ? svc.prices[durNum] : 0;
-    const totalPrice = unitPrice * guestVal;
-    const dpAmount = Math.round(totalPrice * 0.25);
+    // Price and downpayment come from the server (same calculation that stores the booking): no 25% / minimum is hard-coded here.
+    const quoteRoom = document.getElementById("selectedRoomCode") ? document.getElementById("selectedRoomCode").value : "";
+    let quote = null;
+    try {
+      const qs = "service=" + encodeURIComponent(svcVal) + "&duration=" + encodeURIComponent(durVal) + "&guests=" + guestVal +
+        "&roomCode=" + encodeURIComponent(quoteRoom) + "&packageCode=" + encodeURIComponent((pkgForRoom() || {}).package_code || "");
+      const qr = await fetch("api/quote?" + qs, { credentials: "same-origin" });
+      const qd = await qr.json().catch(() => null);
+      if (qr.ok && qd && qd.quote) quote = qd.quote;
+      else { st.textContent = (qd && qd.error) || "We could not calculate the price for this selection."; st.className = "status show err"; return; }
+    } catch (e) { st.textContent = "We could not reach the server to confirm the price. Please try again."; st.className = "status show err"; return; }
+    const priceLabel = peso(quote.totalAmount) + (quote.packageAmount > 0 ? " (includes " + peso(quote.packageAmount) + " " + (quote.packageName || "package") + ")" : "");
     const custName = (s && s.user && s.user.fullName) ? s.user.fullName : "Guest";
     const custEmail = (s && s.user && s.user.email) ? s.user.email : "—";
     const custPhone = formatPhone(phoneVal) || phoneVal;
@@ -391,7 +450,7 @@ async function initBooking(){
     const formattedSched = dateVal + " at " + (typeof f12 === "function" ? f12(timeVal) : timeVal);
 
     if(window.Notice && Notice.confirm){
-      const recName = document.getElementById("recRoomName") ? document.getElementById("recRoomName").textContent : "Spa Suite";
+      const roomName = activeSelectedRoom ? (activeSelectedRoom.name || activeSelectedRoom.roomCode) : "Best free suite (assigned by the spa)";
       const confirmBook = await Notice.confirm({
         title: "Confirm Appointment Submission",
         message: "Are you ready to submit your appointment request for " + esc(svcVal) + "?",
@@ -403,10 +462,10 @@ async function initBooking(){
           ["Service", svcVal],
           ["Duration", durVal + " mins"],
           ["Guests", guestVal + (guestVal > 1 ? " Guests" : " Guest")],
-          ["Suite", recName],
+          ["Suite", roomName],
           ["Date & Time", formattedSched],
-          ["Price", "₱" + totalPrice.toLocaleString() + ".00"],
-          ["Downpayment", "₱" + dpAmount.toLocaleString() + ".00 (25% demo downpayment)"]
+          ["Price", priceLabel],
+          ["Payment", "Opens after the spa confirms your appointment"]
         ],
         confirmLabel: "Submit Appointment",
         cancelLabel: "Review Details"
@@ -434,6 +493,7 @@ async function initBooking(){
       roomId:selRoomId,
       selectedRoomCode:selRoomCode,
       selectedRoomId:selRoomId,
+      packageCode:(pkgForRoom()||{}).package_code||"",
       agreeHealth:!!(agreeHealthBox&&agreeHealthBox.checked),
       agreeTerms:!!(agreeTermsBox&&agreeTermsBox.checked)
     };
@@ -444,45 +504,59 @@ async function initBooking(){
     btn.textContent="Request Appointment";
 
     if(r.ok){
-      const assignedName=(activeSelectedRoom?activeSelectedRoom.name:"") || selRoomCode || "Assigned Suite";
+      const bk=r.data.booking;
+      const assignedName=(activeSelectedRoom?(activeSelectedRoom.name||activeSelectedRoom.roomCode):"")||bk.roomId||"Assigned by the spa";
+      const srvTotal=Number(bk.amount)||quote.totalAmount;   /* the server's own figures, not the browser's estimate */
       st.innerHTML=`<div style="background:#eef7ee;border:1px solid #c2e2c4;border-radius:6px;padding:18px;margin:16px 0;text-align:center">
         <div style="color:#205e26;font-size:1.2rem;font-weight:700;margin-bottom:8px">
-          &#x2713; Appointment Requested: <b>${esc(r.data.booking.id)}</b>
+          &#x2713; Appointment Requested: <b>${esc(bk.id)}</b>
         </div>
         <p style="margin:0 0 6px;color:#284e2c;font-size:.95rem">
-          Your reservation request for <b>${esc(r.data.booking.service)}</b> on <b>${esc(r.data.booking.date)}</b> at <b>${esc(r.data.booking.time)}</b> has been submitted!
+          <b>${esc(bk.service)}</b> on <b>${esc(bk.date)}</b> at <b>${esc(f12(bk.time))}</b> &bull; ${esc(bk.guests)} ${bk.guests==1?"guest":"guests"}
         </p>
+        <p style="margin:0 0 6px;color:#35633a;font-size:.88rem">Suite: <b>${esc(assignedName)}</b></p>
         <p style="margin:0 0 14px;color:#35633a;font-size:.88rem">
-          Assigned Suite: <b>${esc(assignedName)}</b> &bull; Guests: <b>${esc(r.data.booking.guests)}</b>
+          Total <b>${peso(srvTotal)}</b> &bull; Payment opens once the spa confirms your appointment
         </p>
         <a class="btn sm" href="account.html#bookings" style="display:inline-block;background:var(--forest,#203A2A);color:#fff;text-decoration:none;padding:10px 22px">
           View in My Bookings &rarr;
         </a>
       </div>`;
       st.className="status show";
+      st.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"center"});
+      let receiptP=null;
       if(window.Notice && Notice.success){
-        Notice.success("Appointment Requested — Receipt Details", "Your appointment request has been recorded. Here are your booking details:", {
+        receiptP=Notice.success("Appointment Requested — Receipt Details", "Your appointment request has been recorded. Here are your booking details:", {
           details: [
-            ["Booking Reference", r.data.booking.id],
+            ["Booking Reference", bk.id],
             ["Customer Name", custName],
             ["Email", custEmail],
             ["Phone", custPhone],
-            ["Service", r.data.booking.service || svcVal],
+            ["Service", bk.service || svcVal],
             ["Duration", durVal + " mins"],
             ["Guests", guestVal + (guestVal > 1 ? " Guests" : " Guest")],
             ["Suite", assignedName],
-            ["Date & Time", r.data.booking.date + " at " + (typeof f12 === "function" ? f12(r.data.booking.time) : r.data.booking.time)],
-            ["Price", "₱" + totalPrice.toLocaleString() + ".00"],
-            ["Downpayment", "₱" + dpAmount.toLocaleString() + ".00 (25% demo downpayment)"],
+            ["Date & Time", bk.date + " at " + (typeof f12 === "function" ? f12(bk.time) : bk.time)],
+            ["Price", peso(bk.amount != null ? bk.amount : quote.totalAmount)],
             ["Status", "PENDING (Unpaid)"]
           ]
         });
       }
+      const usedPhone=formatPhone(phoneVal);
+      last={service:svcVal,duration:durVal,message:f.msg?f.msg.value.trim():""};   // next booking starts from this one
+      const askDefault=savedPhone&&usedPhone!==savedPhone;
+      if(!savedPhone)savedPhone=usedPhone;   // the server saved the first number to the profile
       f.reset();
+      prefillPhone();
+      applyLast();
       activeSelectedRoom=null;
-      updateDurationOptions();
       updateRoomRecommendations();
       loadSlots();
+      if(askDefault&&window.Notice&&Notice.confirm){   // a different number was used: ask before changing the saved one
+        if(receiptP)await receiptP;
+        const yes=await Notice.confirm({title:"Use this number from now on?",message:"You used "+usedPhone+" for this booking. Your saved number is "+savedPhone+". Make "+usedPhone+" your default number?",confirmLabel:"Yes, make it my default",cancelLabel:"No, keep "+savedPhone});
+        if(yes){const pr=await Auth.api("/api/portal/phone",{phone:usedPhone},"PATCH");if(pr.ok){savedPhone=usedPhone;prefillPhone()}}
+      }
       return;
     }
 

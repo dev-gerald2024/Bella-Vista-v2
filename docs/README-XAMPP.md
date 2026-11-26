@@ -6,8 +6,11 @@ and the PHP API answers the same `/api/...` routes, so login, bookings, the cust
 ## Setup (about 5 minutes)
 1. **Copy the folder** `Bella-Vista-Oasis-Spa` into `C:\xampp\htdocs\` (it also works directly in the htdocs root).
 2. Open the **XAMPP Control Panel** and start **Apache** and **MySQL**.
-3. Open **http://localhost/phpmyadmin** > **Import** > choose `database/schema.sql` > **Go**. This creates the empty application tables.
-4. Open **http://localhost/Bella-Vista-Oasis-Spa/** and register an account.
+3. Open **http://localhost/phpmyadmin** > **Import** > choose `database/schema.sql` > **Go**. This creates the 24 application tables (plus `schema_migrations`). It never deletes anything, so it is safe to import again.
+4. Import `database/seed.sql` the same way (select the `bellavista` database first). It adds the starting spa set-up: 3 room categories, 7 rooms, 3 packages, 4 sample therapists with their weekly shifts, and the 5 payment settings. **Without this step the booking form has no rooms to offer.** It can be run again at any time: it never creates duplicates and never overwrites values you changed in the admin dashboard.
+5. Open **http://localhost/Bella-Vista-Oasis-Spa/** and register an account.
+
+> **Fresh install vs upgrade.** `schema.sql` + `seed.sql` is for a new, empty database. For a database that already has data, never re-create it: take a backup ([BACKUP.md](BACKUP.md)) and follow *Upgrading an existing database* in [DATABASE.md](DATABASE.md). To deliberately wipe a development database use `database/dev-reset.sql` (destructive; its first lines say so).
 
 If your MySQL root user has a password, or you use a different port, put the overrides in `php/config.local.php`.
 
@@ -56,7 +59,7 @@ Everything in the admin menu now changes the public site (allow up to ~20 second
 - Built-in services, rooms and FAQs live in `js/data.js` and cannot be removed from the admin, only replaced or added to.
 
 ## Email (verification + password reset)
-- **No SMTP (local testing):** verification is off. "Forgot password" writes the reset link to `data/mail.log`; open that file and copy the link.
+- **No SMTP (local testing):** verification is off. "Forgot password" writes a one-time reset link (valid 1 hour) to `data/mail.log`; open that file, copy the newest link and open it in the browser. There is no password reset without that link.
 - **Real email:** set `SMTP_URL` and `MAIL_FROM` in `php/config.local.php`, for example
   `smtps://you%40gmail.com:YOUR-APP-PASSWORD@smtp.gmail.com:465` (use a Gmail app password; URL-encode special characters).
   This turns on email verification (booking blocked until verified) and working password reset.
@@ -71,7 +74,7 @@ Everything in the admin menu now changes the public site (allow up to ~20 second
 - `js/auth.js` - one small change: API calls now work when the site is in a subfolder
 
 ## Requirements
-PHP 8.1 or newer (current XAMPP versions), with the default `pdo_mysql` extension. Passwords use Argon2id; if a PHP build lacks it, bcrypt is used automatically.
+PHP 8.1 or newer (the code uses the `never` return type), with the default `pdo_mysql`, `mbstring` and `sodium` extensions, and **MariaDB 10.4 or newer** (the one inside XAMPP; tested on 10.11). The migrations use `ADD COLUMN IF NOT EXISTS`, which MySQL 8 does not support. Apache needs `mod_rewrite` and `mod_headers` (both on in XAMPP) and `AllowOverride All` for the project folder. Passwords use Argon2id; if a PHP build lacks it, bcrypt is used automatically.
 
 ## Going live
 Serve over HTTPS and set `PRODUCTION => true`, `BASE_URL`, and `TRUST_PROXY => true` if behind a proxy. Set `SMTP_URL`. Back up the database with phpMyAdmin > Export.
@@ -79,7 +82,7 @@ You can read appointment requests in phpMyAdmin (table `bookings`) or in the adm
 
 ## Notes
 - Data from the old Node/SQLite version (`data/bellavista.db`) is not migrated.
-- Payment states are simulated records; no payment is processed.
+- Payment states are recorded locally; no live payment gateway is connected.
 - Services and rooms for validation are read from `js/data.js` (entries written as `{name:"...",cat:"...",desc:"..."}` and `{name:"...",desc:"..."}` with double quotes). Admin edits of services/rooms/FAQ content are saved to the database but the public pages still read `js/data.js`, as before.
 
 ## Audit fixes (November 9, 2026)
@@ -145,53 +148,58 @@ Every booking is checked and enforced on the **server** (the frontend form assis
 - Race condition protection: Slot availability check and reservation occur inside a per-day MySQL table/row lock (`with_day_lock`).
 
 ## SQL Upgrade & Migration Reference
-The project includes several migration scripts for upgrades over time:
+The files in `database/migrations/` are numbered and applied in order. A fresh install does not need them (`schema.sql` is already up to date and records them as applied).
 
-| Migration File | Description & Safe Usage |
+| File | What it does |
 |---|---|
-| `upgrade-roles.sql` | Adds user roles (`ADMIN`, `CUSTOMER`) and updates `users` table. Safe for existing data. |
-| `double-booking.sql` | Adds indexes on `bookings` (`date`, `time`, `service`) for scheduling lookups. |
-| `audit-fixes.sql` | Adds MySQL triggers for logging role changes and administrative security. |
-| `upgrade-features.sql` | Adds `reschedule_requests` and `reviews` tables for v5 features. |
-| `upgrade-v5-phase4.1.sql` | **Phase 4.1 safe migration:** Adds `guests`, cancellation audit columns (`cancelled_at`, `cancelled_by`, `cancellation_reason`), reschedule audit columns (`original_date`, `original_time`, `rescheduled_at`, `rescheduled_by`), `room_id` architectural column, and expands status ENUM to include `IN_PROGRESS` and `REJECTED`. Safe and idempotent. |
-| `upgrade-v5-phase5.0.sql` | **Phase 5.0 safe migration:** Adds resource management tables: `room_categories`, `rooms`, `packages`, `therapists`, `therapist_schedules`, `therapist_breaks`, `therapist_leaves`, `room_maintenance`, `room_cleaning`, `appointment_room_assignments`, `appointment_therapist_assignments`. Adds `therapist_id` and `package_id` to `bookings`. Populates documented seed suites, packages, and therapists. Completely safe and idempotent. |
-| `upgrade-v5-phase6.0.sql` | **Phase 6.0 safe migration:** Adds `payment_settings` table, updates `transactions` table with references, receipt numbers, method/type ENUMs, demo flags, and adds payment tracking columns (`payment_status`, `paid_amount`, `downpayment_required`) to `bookings`. Safe and idempotent. |
-| `database/schema.sql` | **Fresh installation schema:** Creates the application tables, triggers, and indexes without importing user or session data. |
+| `001_initial_schema.sql` | First tables (users, sessions, tokens, bookings, content, ...). |
+| `002_roles_and_audit.sql` | Roles (ADMIN / CUSTOMER) and the role-change audit trigger. |
+| `003_double_booking_protection.sql` | Indexes used by the double-booking checks. |
+| `004_features_reschedule_reviews.sql` | Reschedule requests, reviews, favourites. |
+| `005_phase4.1_scheduling_and_cancellation.sql` | Guests, cancellation and reschedule audit columns. |
+| `006_phase5.0_rooms_packages_therapists.sql` | Room, package, therapist, assignment and cleaning tables (structure only, no data: use `seed.sql`). |
+| `007_phase6.0_demo_payments_and_refunds.sql` | Payment settings, transactions, receipts. |
+| `008_secure_db_user.sql` | **Optional, manual.** Creates a restricted database user for going live. Not tracked or run by the runner. |
+| `009_reconcile_legacy_schema.php` | Brings a database built from 001-007 to the same structure as `schema.sql` (old rows are kept in `*_pre009` tables). |
+| `010_room_reference_consistency.sql` | Documents the room-reference rule and adds missing room assignments for older bookings. |
 
-## Phase 6.0: Demo Payment & Transaction Management System
+Apply them with the runner, not by hand: `php tools/migrate.php status` then `php tools/migrate.php up --backup-done` (details and what to do for each situation: [DATABASE.md](DATABASE.md)).
+
+## Phase 6.0: Payment & Transaction Management System
 > [!IMPORTANT]
-> **SIMULATION ONLY — NO REAL MONEY WILL BE TRANSFERRED.**  
-> The payment system is strictly a demonstration checkout experience. No real GCash, Maya, bank accounts, or financial gateways are connected. No real credentials, MPINs, OTPs, or passwords are ever requested.
+> The payment system records payments locally. No real GCash, Maya, bank accounts, or financial gateways are connected. No real credentials, MPINs, OTPs, or passwords are ever requested.
 
 ### 1. Downpayment & Balance Calculation Rules
 - **Configurable Downpayment:** Default is **25%** (`DOWNPAYMENT_PERCENTAGE = 25`), with a configurable minimum of **₱500.00** (`MIN_DOWNPAYMENT_AMOUNT = 500.00`).
 - **Calculation Formula:**
-  - `Downpayment Required = round(Total Amount * (Percentage / 100), 2)`
+  - `Downpayment Required = min(Total, max(Minimum, round(Total x Percentage / 100, 2)))`. With the defaults: PHP 800 -> 500, PHP 1,100 -> 500, PHP 4,000 -> 1,000, PHP 300 -> 300 (never more than the total).
   - `Remaining Balance = max(0, Total Amount - Confirmed Payments)`
-- **Full Payment Option:** Customers can choose to pay the required downpayment or the full 100% treatment amount in advance.
+- **Full Payment Option:** Customers can choose to pay the required downpayment or the full 100% amount in advance. This is controlled by the `ALLOW_FULL_PAYMENT` setting and enforced by the server: when it is off, a full-payment request is refused even if sent directly to the API.
+- **Late cancellation:** when a booking with a paid downpayment is cancelled less than 24 hours before the appointment (judged in Manila time) and `FORFEIT_LATE_CANCELLATION` is on, the downpayment is marked FORFEITED. Nothing is forfeited when the setting is off, when nothing was paid, when the payment was refunded, or when it was already forfeited. Transactions are never deleted. **A fully paid booking cancelled late is not forfeited automatically** (the policy only defines the downpayment): the administrator decides on a refund. This rule needs the spa's confirmation.
+- **One payment at a time:** two clicks on *Pay* (or two admins refunding) for the same booking are processed one after the other, so a payment can never be recorded twice. Payments cannot be made on cancelled or rejected bookings.
+- **Refund status:** after a partial refund the summary reports `PARTIALLY_REFUNDED`; the booking row itself keeps `PARTIALLY_PAID` (the stored column has no separate value for it).
 - **Strict Server Enforcement:** All calculations are performed on the server. Client-submitted payment amounts are ignored or re-validated to prevent manipulation.
 
-### 2. Supported Demo Payment Methods
-1. **GCash Demo:** Simulated mobile wallet payment with interactive processing animation.
-2. **Maya Demo:** Simulated digital wallet payment with interactive processing animation.
-3. **Cash at Spa:** Demo record for payment at the spa. Creates an immediate `PENDING` transaction record; funds are **NOT** credited to `paid_amount` or deducted from `remainingBalance` until an administrator explicitly confirms physical cash receipt at the front desk.
-4. **Demo Bank Transfer:** Simulated bank transfer payment with interactive processing animation.
+### 2. Supported Payment Methods
+1. **GCash:** Mobile wallet payment with interactive processing animation.
+2. **Maya:** Digital wallet payment with interactive processing animation.
+3. **Cash at Spa:** Record for payment at the spa. Creates an immediate `PENDING` transaction record; funds are **NOT** credited to `paid_amount` or deducted from `remainingBalance` until an administrator explicitly confirms physical cash receipt at the front desk.
+4. **Bank Transfer:** Bank transfer payment with interactive processing animation.
 
 ### 3. Payment Status Lifecycle
 - `UNPAID`: Booking created, no confirmed payments received yet.
 - `PENDING`: Awaiting confirmation (e.g. Cash at Spa selected).
 - `PARTIALLY_PAID`: Confirmed downpayment received; remaining balance is due.
 - `PAID`: Booking is paid in full; remaining balance is ₱0.00.
-- `FAILED`: Simulated payment declined during checkout test scenario.
-- `CANCELLED`: Simulated checkout abandoned by customer.
+- `FAILED`: Payment declined during checkout.
+- `CANCELLED`: Checkout abandoned by customer.
 - `PARTIALLY_REFUNDED`: Admin issued partial refund; net paid decreases and balance adjusts.
 - `REFUNDED`: 100% of confirmed payments refunded to customer.
 - `FORFEITED`: Booking cancelled with less than 24 hours notice; downpayment forfeited per spa policy.
 
 ### 4. Admin Payment Management & Analytics
 - **Prominent Disclaimer:** All administrative financial views and reports display:  
-  `SIMULATED PAYMENT TOTALS — NOT ACTUAL REVENUE`
-- **Cash Confirmation:** Front desk staff can click "Confirm Cash" on pending Cash-at-Spa rows to record payment and issue a digital demo receipt.
+- **Cash Confirmation:** Front desk staff can click "Confirm Cash" on pending Cash-at-Spa rows to record payment and issue a digital receipt.
 - **Refund Processing:** Administrators can process partial or full refunds up to the confirmed net payment amount. Over-refunding is strictly blocked.
 - **Rule Configuration:** Downpayment percentage, minimum amount, full payment allowance, and late forfeiture rules can be updated live from Admin Dashboard > Payments > Payment Rules.
 
@@ -214,15 +222,23 @@ The spa includes 7 individual physical treatment rooms across 3 documented categ
   - `MAINTENANCE`: Scheduled downtime / maintenance period.
   - `AVAILABLE`: Open and ready for appointments.
 
-### 2. Documented Spa Packages & Independent Pricing
-Documented room/package packages are configured in `packages`:
-- `PKG-SR`: Single Room Massage (60 min, min 1 guest, standard 1, max 1, base rate ₱800)
-- `PKG-CS`: Couples Suite (60 min, min 2 guests, standard 2, max 2, base rate ₱1,800)
-- `PKG-FL`: Family Spa Lounge (90 min, min 1 guest, standard 4, max 6, base rate ₱4,000 + ₱750/extra guest)
+### 2. Packages (room-type rate cards) and how they are priced
+Packages are configured in `packages` and each belongs to one room category:
+- `PKG-SR`: Single Room Massage (60 min, 1 guest, base rate PHP 800)
+- `PKG-CS`: Couples Suite (60 min, 2 guests, base rate PHP 1,800)
+- `PKG-FL`: Family Spa Lounge (90 min, up to 6 guests, PHP 4,000 for 4 + PHP 750 per extra guest)
 
-**Pricing Relationship Configuration:**
-- In `php/config.php` or `php/config.local.php`: `'PACKAGE_PRICING_RELATIONSHIP' => 'INDEPENDENT'`.
-- Package and room rates are configured independently from service treatment prices. Package prices are never silently added or double-counted into treatment amounts.
+**Booking link.** The booking form sends the package of the chosen room type; the server checks that the package exists, is ACTIVE, matches the room's category and fits the guest count, then saves `bookings.package_id`. The package name appears in the customer's bookings, the admin booking details and the receipt. Deactivating a package never changes old bookings; new bookings simply cannot use it.
+
+**Pricing mode** (`'PACKAGE_PRICING_RELATIONSHIP'` in `php/config.local.php`):
+- `INDEPENDENT` (default): the booking total is the treatment price; the package is linked for the record and its rate is tracked separately.
+- `INCLUSIVE`: the treatment price already covers the room/package; total = treatment price.
+- `ADDITIVE`: total = treatment price + package price (the booking form shows the sum; the server computes the final amount, and the downpayment is calculated from it).
+
+### Services, durations and prices
+- Built-in services and their duration options/prices are in `php/config.php` (`SERVICE_DURATIONS`).
+- In the admin dashboard, **Website > Services** each service has *Durations in minutes*, *Prices in PHP* (same order, for example `60, 90` and `800, 1100`) and *Available for booking*. A service added there is bookable as soon as it has durations and prices; values entered there override the built-in ones; *No* hides it from the site and refuses bookings for it. The server checks every booking against this one source.
+- Only the listed durations can be booked (a request for 70 minutes is refused even if the form is bypassed). Services without durations/prices (for example "Other Spa Treatments", "Not sure yet") cannot be booked online.
 
 ### 3. Therapist Management & Shift Scheduling
 Therapists are tracked with employee codes, contact info, specializations, employment status, and shift schedules:
@@ -259,3 +275,8 @@ Therapists are tracked with employee codes, contact info, specializations, emplo
 - **Print confirmation:** a button on Confirmed and Completed bookings opens the browser print dialog (or Save as PDF) with a clean one-page confirmation: spa name, address/phone from the Content blocks, reference number, service, date, time, price.
 - **Reviews:** after a booking is Completed the customer can leave 1 to 5 stars and an optional comment, once per booking. Visible reviews appear in "Guest reviews" on the home page with first name + last initial only (the section stays hidden until there is at least one). Admin > Business > Reviews lets you hide or show a review; reviews are never deleted.
 - Database: tables `reschedule_requests` and `reviews` (in `database/schema.sql`, or add them to an existing database with the applicable migration).
+
+
+## Offline use and backups
+- Offline setup (fonts, map, email log): see [OFFLINE_MODE.md](OFFLINE_MODE.md).
+- Backup and restore of the database: see [BACKUP.md](BACKUP.md).

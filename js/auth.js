@@ -48,6 +48,7 @@ const Auth=(()=>{
       m.insertAdjacentElement("afterend",mobOut);
       mobOut.onclick=e=>{if(e)e.preventDefault();logout();};
      }
+     if(!ad&&!document.getElementById("acctm-bk")){const bk=document.createElement("a");bk.id="acctm-bk";bk.className="btn mob ghost";bk.href="account.html#bookings";bk.textContent="My appointments";bk.style.marginTop="6px";m.insertAdjacentElement("afterend",bk)}
     }
     if(a)a.innerHTML=`<button class="al" id="acb" aria-expanded="false" aria-haspopup="true" aria-controls="acm">Account <span aria-hidden="true">&#9662;</span></button><div class="acm" id="acm" role="menu"><div class="who">${esc(s.user.fullName)}<br>${esc(s.user.email)}</div>${s.user.isAdmin?`<a href="admin.html" role="menuitem">Admin Dashboard</a><a href="admin.html#b-all" role="menuitem">All Bookings</a>`:`<a href="account.html" role="menuitem">My Profile</a><a href="account.html#bookings" role="menuitem">My Appointments</a>`}<button type="button" id="lo" role="menuitem">Sign Out</button></div>`;
     const b=$("#acb"),menu=$("#acm");if(b){const t=o=>{menu.classList.toggle("open",o);b.setAttribute("aria-expanded",o)};
@@ -55,7 +56,7 @@ const Auth=(()=>{
      document.addEventListener("keydown",e=>{if(e.key=="Escape"&&menu.classList.contains("open")){t(false);b.focus()}});
      $("#lo").onclick=e=>{if(e)e.preventDefault();t(false);logout();}}
    } else {
-    if(m){m.textContent="Login / Register";m.href="login.html";const mobOut=document.getElementById("acctm-out");if(mobOut)mobOut.remove();}
+    if(m){m.textContent="Login / Register";m.href="login.html";const mobOut=document.getElementById("acctm-out");if(mobOut)mobOut.remove();const mobBk=document.getElementById("acctm-bk");if(mobBk)mobBk.remove();}
     if(a){
      a.innerHTML=`<button class="al" id="acb" aria-expanded="false" aria-haspopup="true" aria-controls="acm">Account <span aria-hidden="true">&#9662;</span></button><div class="acm" id="acm" role="menu"><a href="login.html" role="menuitem">Login</a><a href="register.html" role="menuitem">Create Account</a></div>`;
      const b=$("#acb"),menu=$("#acm");if(b){const t=o=>{menu.classList.toggle("open",o);b.setAttribute("aria-expanded",o)};
@@ -73,8 +74,8 @@ const Auth=(()=>{
  }
  function gate(s){
   const old=$("#dlg");if(old&&old.open)old.close();
-  let d=$("#authdlg");if(!d){document.body.insertAdjacentHTML("beforeend",`<dialog id="authdlg" aria-labelledby="agt"><span class="eb">Reserve Your Experience</span><h3 id="agt">An account is required to make a reservation.</h3><p id="agp"></p><div class="hb"><a class="btn sm" href="login.html?next=${q}">Login</a><a class="btn sm line" href="register.html?next=${q}">Create account</a><button class="btn sm line" id="agx" type="button">Not now</button></div></dialog>`);d=$("#authdlg");$("#agx").onclick=()=>d.close();d.addEventListener("click",e=>{if(e.target===d)d.close()})}
-  $("#agp").textContent=s&&s.offline?"The account service is not available right now. Please try again shortly.":"Please sign in or create a Bella Vista Oasis Spa account before making a reservation.";
+  let d=$("#authdlg");if(!d){document.body.insertAdjacentHTML("beforeend",`<dialog id="authdlg" aria-labelledby="agt"><button class="agc" id="agc" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button><div class="agh"><span class="agi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path class="agsh" d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1" fill="currentColor"/></svg></span></div><div class="agb"><span class="eb">Reserve Your Experience</span><h3 id="agt">An account is required to make a reservation.</h3><p id="agp"></p><ul class="agl" id="agl"><li>Choose your treatment and time</li><li>Manage or reschedule your bookings</li><li>Get updates on your appointments</li></ul><div class="aga"><a class="btn" autofocus href="login.html?next=${q}">Login</a><a class="btn line" href="register.html?next=${q}">Create account</a><button class="agx" id="agx" type="button">Not now</button></div></div></dialog>`);d=$("#authdlg");$("#agx").onclick=$("#agc").onclick=()=>d.close();d.addEventListener("click",e=>{if(e.target===d)d.close()})}
+  $("#agl").hidden=!!(s&&s.offline);$("#agp").textContent=s&&s.offline?"The account service is not available right now. Please try again shortly.":"Please sign in or create a Bella Vista Oasis Spa account before making a reservation.";
   d.showModal()}
  async function logout(skipConfirm=false){
   const notifier = (typeof Notice !== "undefined" && Notice) || (typeof window !== "undefined" && window.Notice);
@@ -106,7 +107,7 @@ const Auth=(()=>{
  function renderPw(){document.querySelectorAll("[data-pw]").forEach(el=>{
   const id=el.dataset.pw,meter=el.hasAttribute("data-meter"),ac=el.dataset.ac||"current-password";
   el.className="f";el.dataset.f=id;
-  el.innerHTML=`<label for="${id}">${esc(el.dataset.label)}</label><div class="pw"><input id="${id}" name="${id}" type="password" autocomplete="${ac}" required><button type="button" class="eye" aria-label="Show ${esc(el.dataset.label.toLowerCase())}" aria-pressed="false">${EYE}</button></div><div class="err"></div>`+
+  el.innerHTML=`<label for="${id}">${esc(el.dataset.label)}</label><div class="pw"><input id="${id}" name="${id}" type="password" autocomplete="${ac}"${el.dataset.ph?` placeholder="${esc(el.dataset.ph)}"`:""} required><button type="button" class="eye" aria-label="Show ${esc(el.dataset.label.toLowerCase())}" aria-pressed="false">${EYE}</button></div><div class="err"></div>`+
   (meter?`<div class="meter" data-l="0" aria-live="polite"><span>Password strength</span><span class="dots"><i></i><i></i><i></i><i></i><i></i></span><b class="sl"></b></div><div class="warn" role="status"><b></b><span></span></div><div class="reqs-h">Password requirements</div><ul class="reqs">${REQS.map(r=>`<li data-r="${r[0]}">${r[1]}</li>`).join("")}</ul>`:"")+(id.startsWith("confirm")?'<div class="mt" role="status" aria-live="polite"></div>':"");
   const inp=el.querySelector("input"),eye=el.querySelector(".eye");
   eye.onclick=()=>{const s=inp.type==="password";inp.type=s?"text":"password";eye.classList.toggle("shown",s);eye.setAttribute("aria-pressed",s);eye.setAttribute("aria-label",(s?"Hide ":"Show ")+el.dataset.label.toLowerCase())};
@@ -192,37 +193,11 @@ const Auth=(()=>{
     mark("email",eOk?"":"Please enter a valid Gmail address.");
     if(!eOk)return;
 
-    // Direct password reset (Local environment / exact function of resetpassword.php)
-    if(pwEl&&cf){
-     const pVal=pwEl.value, cVal=cf.value;
-     if(!pVal){mark("password","Please enter a new password.");pwEl.focus();return;}
-     const pe=pwErr(pVal);if(pe){mark("password",pe);pwEl.focus();return;}
-     mark("password","");
-     if(pVal!==cVal){mark("confirmPassword","Passwords do not match.");cf.focus();return;}
-     mark("confirmPassword","");
-
-     const b=$("#go");busy(b,true,"Resetting password...");
-     const r=await api("/api/auth/reset-direct",{email:ev,password:pVal,confirmPassword:cVal});
-     busy(b,false);
-
-     if(r.ok){
-      if(window.Notice&&Notice.toast)Notice.toast("success","Password updated successfully");
-      F.hidden=true;
-      const fd=$("#forgotDone");
-      fd.hidden=false;
-     }else{
-      if(r.data&&r.data.field){
-       mark(r.data.field,r.data.error);
-       if(r.data.field==="email")em.focus();
-       else if(r.data.field==="password")pwEl.focus();
-      }
-      banner(F,(r.data&&r.data.error)||"Error updating password (email may not exist)","aerr");
-     }
-     return;
-    }
-
     const b=$("#go");busy(b,true,"Processing...");const r=await api("/api/auth/forgot",{email:ev});busy(b,false);
-    if(r.ok){F.hidden=true;$("#forgotDone").hidden=false;}
+    if(r.ok){F.hidden=true;const fd=$("#forgotDone"),dl=r.data&&r.data.delivery,lg=dl==="log",sc=dl==="screen";fd.hidden=false;
+     const em2=fd.querySelector("[data-when=email]"),lg2=fd.querySelector("[data-when=log]"),sc2=fd.querySelector("[data-when=screen]");
+     if(em2)em2.hidden=lg||sc;if(lg2)lg2.hidden=!lg;if(sc2)sc2.hidden=!sc;
+     const ol=$("#offlineLink");if(ol){if(sc&&r.data.resetLink)ol.href=r.data.resetLink;else ol.hidden=true}}
     else{if(r.data.field)mark(r.data.field,r.data.error);banner(F,r.data.error||"Something went wrong.","aerr");}
    });
   }
@@ -232,18 +207,7 @@ const Auth=(()=>{
    const emailParam=(location.hash.match(/email=([^&]+)/)||[])[1];
    history.replaceState(null,"",location.pathname);
 
-   const emField=$("#resetEmailField"),emInput=emField?emField.querySelector("input"):null;
-   if(!tk){
-    if(emField){
-     emField.style.display="block";
-     if(emailParam){
-      emInput.value=decodeURIComponent(emailParam);
-      mark("email","");
-     }
-    }else{
-     X.hidden=true;$("#badLink").hidden=false;
-    }
-   }
+   if(!tk){X.hidden=true;$("#badLink").hidden=false;}
 
    const pwEl=X.querySelector('[data-f="password"] input'),cf=X.querySelector('[data-f="confirmPassword"] input'),mt=X.querySelector(".mt");
    const match=()=>{if(!cf.value){mt.textContent="";mt.className="mt";return}const ok=cf.value===pwEl.value;mt.textContent=ok?"\u2713 Passwords match":"Passwords do not match.";mt.className="mt"+(ok?" ok":"")};
@@ -251,21 +215,12 @@ const Auth=(()=>{
 
    X.addEventListener("submit",async e=>{e.preventDefault();banner(X,"","");
     const pe=pwErr(pwEl.value);
-    if(emField&&!tk){
-     const emVal=emInput.value.trim();
-     mark("email",GMAIL.test(emVal)?"":"Please enter a valid Gmail address.");
-     if(!GMAIL.test(emVal))return;
-    }
+    if(!tk)return;
     mark("password",pe||"");mark("confirmPassword",cf.value===pwEl.value?"":"Passwords do not match.");
     if(pe||cf.value!==pwEl.value)return;
 
     const b=$("#go");busy(b,true,"Saving...");
-    let r;
-    if(tk){
-     r=await api("/api/auth/reset",{token:tk,password:pwEl.value,confirmPassword:cf.value});
-    }else{
-     r=await api("/api/auth/reset-direct",{email:emInput.value.trim(),password:pwEl.value,confirmPassword:cf.value});
-    }
+    const r=await api("/api/auth/reset",{token:tk,password:pwEl.value,confirmPassword:cf.value});
     busy(b,false);
 
     if(r.ok){
@@ -274,8 +229,7 @@ const Auth=(()=>{
      $("#resetDone").hidden=false;
     }else if(r.data&&r.data.field){
      mark(r.data.field,r.data.error);
-     if(r.data.field==="email"&&emInput)emInput.focus();
-     else if(r.data.field==="password"&&pwEl)pwEl.focus();
+     if(r.data.field==="password"&&pwEl)pwEl.focus();
      banner(X,r.data.error||"Something went wrong.","aerr");
     }else{
      banner(X,(r.data&&r.data.error)||"Something went wrong.","aerr");

@@ -3,11 +3,11 @@
 ## 1. Project Overview
 **Bella Vista Oasis Spa** is a luxury spa reservation and management web application designed for seamless appointment scheduling, room and therapist assignment, customer portal management, and simulated digital checkout.
 
-- **Stack:** PHP 8.0+ (PDO & mysqli), MariaDB 10.4+ / MySQL 8.0+, Modern Vanilla ES6 JavaScript, HTML5, CSS3.
+- **Stack:** PHP 8.1+ (PDO & mysqli), MariaDB 10.4+ (tested on 10.11; MySQL 8 is not supported because the migrations use MariaDB syntax), Modern Vanilla ES6 JavaScript, HTML5, CSS3.
 - **Environment:** Apache / XAMPP (Windows, Linux, macOS).
 - **Timezone:** `Asia/Manila` (PHT, UTC+8).
 - **Operating Hours:** Monday–Sunday, 1:00 PM to 9:00 PM (13:00–21:00).
-- **Payment Mode:** Local Demo Simulation (no real bank or e-wallet integration; safe for academic and demonstration purposes).
+- **Payment Mode:** Local payment recording (no live bank or e-wallet integration).
 
 ---
 
@@ -44,7 +44,7 @@ Bella-Vista-Oasis-Spa/
 │   ├── db.js                   # Client-side API abstraction layer
 │   ├── main.js                 # Public page animations & header interactions
 │   ├── booking.js              # Booking widget, dynamic calendar & rules
-│   ├── account.js              # Customer portal rendering, sorts & demo payments
+│   ├── account.js              # Customer portal rendering, sorts & payments
 │   └── admin.js                # Administrator dashboard, schedules & assignments
 │
 ├── php/
@@ -54,12 +54,10 @@ Bella-Vista-Oasis-Spa/
 │   ├── schedule.php            # Real-time slot availability & cleaning buffers
 │   ├── rooms.php               # Room capacity, therapist shifts & assignments
 │   ├── portal.php              # Customer portal backend & 24h policies
-│   └── payments.php            # Demo payment simulation, receipts & refunds
+│   └── payments.php            # Payment processing, receipts & refunds
 │
 ├── database/
 │   ├── schema.sql              # Clean, authoritative DDL structure (24 tables)
-│   ├── db_connection.php       # Central mysqli connection reading php/config.php
-│   ├── db_connect.php          # Alias for db_connection.php
 │   └── migrations/             # Chronological migration history (001–008)
 │       ├── 001_initial_schema.sql
 │       ├── 002_roles_and_audit.sql
@@ -86,33 +84,24 @@ Bella-Vista-Oasis-Spa/
 
 ## 3. Database Source of Truth
 
-The database system is organized into a clean, predictable workflow:
+1. **`database/schema.sql`** - the authoritative structure (24 tables + `schema_migrations`, keys, indexes, the `userdata` view and the `trg_users_role_log` trigger). It never drops anything and is safe to re-import.
+2. **`database/seed.sql`** - the starting spa set-up (room categories, rooms, packages, therapists, payment settings). Idempotent: safe to run again; keeps admin changes.
+3. **`database/migrations/`** - numbered upgrade steps for existing databases, applied with `php tools/migrate.php` (tracked in `schema_migrations`). See [DATABASE.md](DATABASE.md).
+4. **`database/dev-reset.sql`** - deliberately destructive: deletes the whole database (development only).
 
-1. **`database/schema.sql`**:
-   The authoritative structure for the entire application. Contains all 24 tables, primary keys, foreign keys with referential integrity (`RESTRICT`/`CASCADE`), performance indexes, the `userdata` view, and the `trg_users_role_log` audit trigger.
+Local data is not included: exports can contain personal details and password hashes. Create your own account after installing.
 
-2. **Local data is not included**:
-   Database exports and runtime data can contain personal details, account hashes, sessions, and other private information. Create your own account after installing the schema.
-
-3. **`database/migrations/`**:
-   The chronological record of all schema evolutions from initial release through Phase 6.0. Useful for tracking feature history or migrating older installations incrementally.
-
-### How to Install or Restore the Database
-In phpMyAdmin or MySQL CLI:
-```bash
-mysql -u root < database/schema.sql
-```
-The schema creates empty tables. Register an account through the site; if it should be an administrator, promote your own account using the instructions in the XAMPP guide. Do not publish database exports or local credentials.
-
----
+### How to install
+1. Import `database/schema.sql`, then `database/seed.sql` (phpMyAdmin > Import, or `mysql -u root < database/schema.sql` and `mysql -u root bellavista < database/seed.sql`).
+2. Register on the site; promote your own account to administrator with the XAMPP guide.
 
 ## 4. Security & Configuration Best Practices
 
 - **Centralized Database Configuration:**
-  Default settings live in `php/config.php`. Put local database credentials, SMTP settings, and test passwords in the untracked `php/config.local.php`; both the PDO engine (`php/lib.php`) and legacy mysqli connector (`database/db_connection.php`) read the combined settings.
+  Default settings live in `php/config.php`. Put local database credentials, SMTP settings, and test passwords in the untracked `php/config.local.php`; both the PDO engine (`php/lib.php`) reads the combined settings.
 - **Production Password Safety:**
   Argon2id and Bcrypt algorithms hash all stored passwords. Configure any local test passwords in the untracked `php/config.local.php` file; never add real credentials to version control.
 - **Dedicated Database User:**
-  For production deployment, run [`database/migrations/008_secure_db_user.sql`](file:///C:/xampp/htdocs/Bella-Vista-Oasis-Spa/database/migrations/008_secure_db_user.sql) to grant unprivileged data access (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) to a dedicated `bellavista_app` user rather than `root`.
+  For production deployment, run [`database/migrations/008_secure_db_user.sql`](database/migrations/008_secure_db_user.sql) to grant unprivileged data access (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) to a dedicated `bellavista_app` user rather than `root`.
 - **Apache Hardening:**
-  [`.htaccess`](file:///C:/xampp/htdocs/Bella-Vista-Oasis-Spa/.htaccess) prevents direct access to `.sql`, `.md`, `.env`, PHP libraries, and the `data/` folder, while enforcing modern security headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and restrictive `Content-Security-Policy`).
+  [`.htaccess`](.htaccess) prevents direct access to `.sql`, `.md`, `.env`, PHP libraries, and the `data/` folder, while enforcing modern security headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and restrictive `Content-Security-Policy`).

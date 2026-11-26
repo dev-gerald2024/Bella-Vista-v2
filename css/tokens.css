@@ -1,0 +1,16 @@
+/* Bella Vista Oasis Spa - design tokens. Single source for colour, type and motion.
+   Loaded first on EVERY page (public, account, admin); css/style.css, css/account.css and css/admin.css only use these. */
+:root{
+  /* colour */
+  --forest:#203A2A;--deep:#14271C;--sage:#71806D;--gold:#C5A46D;--gd:#735617;
+  --iv:#F8F4EA;--cr:#EDE5D6;--ink:#20251F;--mut:#4a5a4d;
+  --line:rgba(197,164,109,.45);
+  /* type */
+  --font-display:"Cormorant Garamond",Georgia,serif;
+  --font-body:Jost,system-ui,sans-serif;
+  /* shape + motion */
+  --radius:2px;
+  --shadow-1:0 6px 24px rgba(20,39,28,.07);
+  --ease:cubic-bezier(.22,1,.36,1);
+  --hh:72px;
+}

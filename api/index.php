@@ -30,8 +30,9 @@ if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
   if ($origin !== '' && $origin !== origin_of(base_url()) && $origin !== request_origin()) fail('Request blocked.', 403);
   $ct = strtolower($_SERVER['CONTENT_TYPE'] ?? '');
   if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'bella-vista' || strpos($ct, 'application/json') !== 0) fail('Request blocked.', 403);
-  $raw = file_get_contents('php://input', false, null, 0, 20481);
-  if (strlen($raw) > 20480) fail('Invalid request.', 400);
+  $lim = ($path ?? '') === '/admin/team-photo' ? 600000 : 20480;   // only the team photo upload may be larger (it is resized in the browser first)
+  $raw = file_get_contents('php://input', false, null, 0, $lim + 1);
+  if (strlen($raw) > $lim) fail($lim > 20480 ? 'The photo is too large. Choose a smaller image.' : 'Invalid request.', $lim > 20480 ? 413 : 400);
   if (trim($raw) !== '') {
     $body = json_decode($raw, true);
     if (json_last_error() !== JSON_ERROR_NONE) fail('Invalid request.', 400);
@@ -111,11 +112,14 @@ if ($path === '/auth/forgot' && $method === 'POST') {
   $email = norm_email($body['email'] ?? '');
   if (!ok_email($email)) fail('Please enter a valid Gmail address.', 400, ['field' => 'email']);
   $u = q1('SELECT * FROM users WHERE LOWER(email)=LOWER(?)', [$email]);
-  if (!$u) fail('Email not found. No account is registered with this address.', 404, ['field' => 'email']);
-  if ($u && (mail_enabled() || mail_dev_log())) {
-    try { send_token((int)$u['id'], $u['email'], $u['full_name'], 'reset'); } catch (Throwable $e) { error_log('mail error: ' . $e->getMessage()); }
+  // The answer is the same whether or not the address has an account, so this form cannot be used to find out who is registered.
+  $link = null;
+  if ($u && (mail_enabled() || mail_dev_log() || offline_reset_shown())) {
+    try { $link = send_token((int)$u['id'], $u['email'], $u['full_name'], 'reset'); } catch (Throwable $e) { error_log('mail error: ' . $e->getMessage()); }
   }
-  out(['ok' => true, 'directReset' => !mail_enabled(), 'email' => $email]);
+  $res = ['ok' => true, 'delivery' => mail_enabled() ? 'email' : (offline_reset_shown() ? 'screen' : (mail_dev_log() ? 'log' : 'none'))];
+  if ($link && offline_reset_shown()) $res['resetLink'] = $link;   // offline use only (see OFFLINE_RESET_ON_SCREEN)
+  out($res);
 }
 if ($path === '/auth/reset' && $method === 'POST') {
   rate_limit('reset', 10, 36e5, $body);
@@ -131,25 +135,8 @@ if ($path === '/auth/reset' && $method === 'POST') {
   run('DELETE FROM sessions WHERE user_id=?', [$uid]);   // sign out everywhere
   out(['ok' => true, 'message' => 'Password updated successfully.']);
 }
-if ($path === '/auth/reset-direct' && $method === 'POST') {
-  rate_limit('reset', 10, 36e5, $body);
-  $email = norm_email($body['email'] ?? '');
-  $pw = $body['password'] ?? null;
-  $cpw = $body['confirmPassword'] ?? null;
-  if (!ok_email($email)) fail('Please enter a valid Gmail address.', 400, ['field' => 'email']);
-  if ($pw === null || $pw === '') fail('Please enter a new password.', 400, ['field' => 'password']);
-  if ($cpw !== $pw) fail('Passwords do not match.', 400, ['field' => 'confirmPassword']);
-  $pe = pw_error($pw); if ($pe) fail($pe, 400, ['field' => 'password']);
-  $u = q1('SELECT id, role, password_hash FROM users WHERE LOWER(email)=LOWER(?)', [$email]);
-  if (!$u) fail('Error updating password (email may not exist).', 404, ['field' => 'email']);
-  if (!empty($u['password_hash']) && pw_verify($pw, $u['password_hash'])) {
-    fail('New password cannot be the same as your old password. Please enter a different password.', 400, ['field' => 'password']);
-  }
-  run('UPDATE users SET password_hash=?, email_verified=1 WHERE id=?', [pw_hash($pw), $u['id']]);
-  if ($u['role'] === 'ADMIN') admin_log((int)$u['id'], 'Password reset directly by email');
-  run('DELETE FROM sessions WHERE user_id=?', [$u['id']]);   // sign out everywhere
-  out(['ok' => true, 'message' => 'Password updated successfully.']);
-}
+/* NOTE: the old /auth/reset-direct route (password change with only an email address, no token) was removed in Phase 2.
+   Password recovery is token-only: /auth/forgot creates the link (emailed, or written to data/mail.log when no SMTP is set), /auth/reset consumes it. */
 
 /* ---------- public: services and rooms as edited in the admin dashboard (no private data) ---------- */
 if ($path === '/content' && $method === 'GET') { header('Cache-Control: public, max-age=20'); out(content_overlay()); }
@@ -160,9 +147,12 @@ if ($path === '/reviews' && $method === 'GET') api_public_reviews();
 /* ---------- public: free start times for a date and service ---------- */
 if ($path === '/availability' && $method === 'GET') api_availability();
 
+/* ---------- public: authoritative price / downpayment preview for the booking form ---------- */
+if ($path === '/quote' && $method === 'GET') api_booking_quote($_GET);
+
 /* ---------- public: Phase 5 packages catalog ---------- */
 if ($path === '/packages' && $method === 'GET') {
-  out(['ok' => true, 'packages' => get_packages(true), 'categories' => get_room_categories()]);
+  out(['ok' => true, 'packages' => get_packages(true), 'categories' => get_room_categories(), 'pricingRelationship' => strtoupper((string)(cfg('PACKAGE_PRICING_RELATIONSHIP') ?: 'INDEPENDENT'))]);
 }
 
 /* ---------- public: Dynamic Room Recommendation ---------- */
@@ -195,12 +185,12 @@ if ($path === '/therapists/available' && $method === 'GET') {
   out(['ok' => true, 'therapists' => get_available_therapists($date, $time, $dur, $svc)]);
 }
 
-/* ---------- public: Phase 6 payment settings & demo mode info ---------- */
+/* ---------- public: Phase 6 payment settings ---------- */
 if ($path === '/payment/settings' && $method === 'GET') {
   out([
     'ok' => true,
     'settings' => get_all_payment_settings(),
-    'disclaimer' => cfg('DEMO_DISCLAIMER_TEXT', 'DEMO PAYMENT — NO REAL MONEY WILL BE TRANSFERRED.')
+    'disclaimer' => ''
   ]);
 }
 
@@ -211,6 +201,7 @@ if ($path === '/bookings' && $method === 'POST') {
   rate_limit('book', 20, 36e5, $body, true, (string)$user['id']); api_create_booking($user, $body);
 }
 if ($path === '/bookings' && $method === 'GET') { $need_auth(); api_list_my_bookings($user); }
+if ($path === '/bookings/last' && $method === 'GET') { $need_auth(); api_last_booking($user); }
 
 /* ---------- customer portal ---------- */
 if ($path === '/portal' || strpos($path, '/portal/') === 0) {
@@ -218,6 +209,7 @@ if ($path === '/portal' || strpos($path, '/portal/') === 0) {
   if ($path === '/portal' && $method === 'GET') out(portal_snapshot($user['id']));
   if ($path === '/portal/profile' && $method === 'PATCH') portal_profile($user, $body);
   if ($path === '/portal/preferences' && $method === 'PUT') portal_preferences($user, $body);
+  if ($path === '/portal/phone' && $method === 'PATCH') portal_set_phone($user, $body);
   if (preg_match('#^/portal/bookings/([^/]+)/cancel$#D', $path, $m) && $method === 'POST') portal_cancel($user, urldecode($m[1]), $body);
   if ($path === '/portal/notifications/read' && $method === 'POST') portal_read_all($user);
   if (preg_match('#^/portal/bookings/([^/]+)/hide$#D', $path, $m) && $method === 'POST') portal_hide($user, urldecode($m[1]));
@@ -228,7 +220,7 @@ if ($path === '/portal' || strpos($path, '/portal/') === 0) {
   if ($path === '/portal/password' && $method === 'POST') { rate_limit('pw', 10, 36e5, $body); portal_password($user, $body); }
   if ($path === '/portal/clear' && $method === 'POST') portal_clear($user);
 
-  /* ---- Phase 6.0 Customer Demo Payment Routes ---- */
+  /* ---- Phase 6.0 Customer Payment Routes ---- */
   if (preg_match('#^/portal/bookings/([^/]+)/payment$#D', $path, $m) && $method === 'GET') {
     $b = own_booking($user, urldecode($m[1]));
     out(['ok' => true, 'payment' => calculate_booking_payment_summary((int)$b['id'])]);
@@ -236,7 +228,7 @@ if ($path === '/portal' || strpos($path, '/portal/') === 0) {
   if (preg_match('#^/portal/bookings/([^/]+)/pay$#D', $path, $m) && $method === 'POST') {
     rate_limit('pay', 30, 36e5, $body, true, (string)$user['id']);
     $b = own_booking($user, urldecode($m[1]));
-    $res = process_demo_payment((int)$b['id'], $body + ['userId' => (int)$user['id']]);
+    $res = process_demo_payment((int)$b['id'], ['userId' => (int)$user['id']] + array_diff_key($body, ['userId' => 1]));   // the user always comes from the session, never from the request
     out(['ok' => true] + $res + portal_snapshot((int)$user['id']));
   }
   if (preg_match('#^/portal/transactions/([^/]+)/receipt$#D', $path, $m) && $method === 'GET') {
@@ -256,6 +248,8 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
   if (empty($user['isAdmin'])) fail('Admin access required.', 403, ['code' => 'admin_required']);
   admin_actor($user);
   if ($path === '/admin/data' && $method === 'GET') out(admin_snapshot());
+  if ($path === '/admin/team-photo' && $method === 'POST') admin_team_photo($body);
+  if ($path === '/admin/reminders/run' && $method === 'POST') { $r = send_booking_reminders(24); admin_log(admin_actor(), 'Reminders sent', '', $r['sent'] . ' sent, ' . $r['skipped'] . ' skipped', admin_display_name()); admin_done(['reminders' => $r]); }
   if (preg_match('#^/admin/customers/([^/]+)/active$#D', $path, $m) && $method === 'POST') admin_set_active(urldecode($m[1]), $body);
   if (preg_match('#^/admin/reschedules/(\d+)/decision$#D', $path, $m) && $method === 'POST') admin_decide_reschedule($m[1], $body);
   if (preg_match('#^/admin/reviews/(\d+)/visibility$#D', $path, $m) && $method === 'POST') admin_review_visibility($m[1], $body);
@@ -289,7 +283,7 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     $reason = clean_text($body['reason'] ?? 'Scheduled Maintenance', 300);
     if ($sDate === '') fail('Start date is required.', 400);
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+    $adminName = admin_display_name();
     run('INSERT INTO room_maintenance (room_id, start_date, start_time, end_date, end_time, reason, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [$roomId, $sDate, $sTime, $eDate, $eTime, $reason, 'SCHEDULED', $adminName]);
     admin_done();
@@ -335,8 +329,8 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     $roomId = (int)($body['roomId'] ?? 0);
     if (!$roomId) fail('Please select a valid room.', 400);
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
-    $res = assign_appointment_room($bid, $roomId, $adminName);
+    $adminName = admin_display_name();
+    $res = assign_appointment_room($bid, $roomId, $adminName, (string)($body['reason'] ?? ''));
     admin_done(['assignment' => $res]);
   }
   if (preg_match('#^/admin/bookings/([^/]+)/assign-therapist$#D', $path, $m) && $method === 'POST') {
@@ -345,7 +339,7 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     $thId = (int)($body['therapistId'] ?? 0);
     if (!$thId) fail('Please select a valid therapist.', 400);
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+    $adminName = admin_display_name();
     $res = assign_appointment_therapist($bid, $thId, $adminName);
     admin_done(['assignment' => $res]);
   }
@@ -376,7 +370,7 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     $tid = resolve_txn_id(urldecode($m[1]));
     if (!$tid) fail('Invalid transaction reference.', 400);
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+    $adminName = admin_display_name();
     $res = admin_confirm_cash_payment($tid, $adminName);
     admin_log($admin, 'Cash payment confirmed', 'TXN-' . $tid);
     admin_done(['transaction' => $res]);
@@ -387,7 +381,7 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     $amount = (float)($body['amount'] ?? 0);
     $reason = trim((string)($body['reason'] ?? ''));
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+    $adminName = admin_display_name();
     $res = process_demo_refund($bid, $amount, $reason, $adminName);
     admin_log($admin, 'Refund processed', 'BK-' . $bid, '₱' . number_format($amount, 2));
     admin_done(['refund' => $res]);
@@ -397,9 +391,9 @@ if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     if (!$bid) fail('Invalid booking ID.', 400);
     $reason = trim((string)($body['reason'] ?? 'Late cancellation forfeiture'));
     $admin = admin_actor();
-    $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
-    $res = forfeit_demo_downpayment($bid, $reason, $adminName);
-    admin_log($admin, 'Downpayment forfeited', 'BK-' . $bid, $reason);
+    $adminName = admin_display_name();
+    $res = forfeit_demo_downpayment($bid, $reason, $adminName);   // logs itself
+    if (!$res) fail('Nothing to forfeit: this booking has no paid, un-refunded downpayment (or it was already forfeited).', 409);
     admin_done(['forfeiture' => $res]);
   }
   if (preg_match('#^/admin/transactions/([^/]+)/receipt$#D', $path, $m) && $method === 'GET') {

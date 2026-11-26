@@ -1,4 +1,6 @@
 /* Bella Vista Oasis Spa - shared UI: header/footer, nav, renderers, dialogs, motion. Needs data.js + booking.js first. */
+/* a social link counts only when it points to a real page, not to the bare site home page */
+function realSocial(u) { return !!u && /^https?:\/\//i.test(u) && !/^https?:\/\/(www\.|m\.)?(facebook|instagram)\.com\/?$/i.test(u.trim()); }
 (async () => {
   await CONFIG.ready;
   const $ = (s) => document.querySelector(s),
@@ -60,7 +62,7 @@
     "beforeend",
     `<footer><div class="bt f1" aria-hidden="true"></div><div class="wrap"><div class="fg">
  <div><a class="badge" href="index.html" aria-label="${SITE.brand}, home"><img src="assets/logo/logo.png" width="120" height="120" alt="${SITE.brand}" loading="lazy"></a><p style="max-width:34ch">${esc(SITE.statement)}</p>
-  <div class="soc">${`<a href="${C.facebook}" target="_blank" rel="noopener" aria-label="Facebook">${ic.fb}</a>` + (C.instagram ? `<a href="${C.instagram}" target="_blank" rel="noopener" aria-label="Instagram">${ic.ig}</a>` : "")}</div></div>
+  <div class="soc">${(realSocial(C.facebook) ? `<a href="${C.facebook}" target="_blank" rel="noopener" aria-label="Facebook">${ic.fb}</a>` : "") + (C.instagram ? `<a href="${C.instagram}" target="_blank" rel="noopener" aria-label="Instagram">${ic.ig}</a>` : "")}</div></div>
  <div><h4>Navigate</h4><ul>${foot}</ul></div>
  <div><h4>Services</h4><ul>${CONFIG.services.map((s) => `<li><a href="services.html">${esc(s.name)}</a></li>`).join("")}</ul></div>
  <div><h4>Contact</h4><ul><li>${esc(C.address)}</li><li>${link(C.phone, hasPh && "tel:" + tel)}</li><li>${link(C.email, "mailto:" + C.email)}</li><li>${esc(C.hours)}</li></ul></div>
@@ -72,11 +74,16 @@
 
   /* ---------- renderers (same markup/classes as v4) ---------- */
   const ph = (o, cls = "") =>
-    `<div class="ph ${cls} ${o.img ? "has" : ""}" ${o.img ? `style="background-image:url('${o.img}')"` : ""} role="img" aria-label="${esc(o.alt || o.name || "Spa photo")}"></div>`;
+    `<div class="ph ${cls} ${o.img ? "has" : ""}" ${o.img ? `style="background-image:url('${o.img}')${o.pos ? `;background-position:${esc(o.pos)}` : ""}"` : ""} role="img" aria-label="${esc(o.alt || o.name || "Spa photo")}"></div>`;
+  /* length and price of a treatment, from the same data the booking form uses: "60 min ₱800 · 90 min ₱1,100" */
+  const priceLine = (o) =>
+    Array.isArray(o.durations) && o.durations.length && o.prices
+      ? o.durations.map((d) => `${d} min ₱${Number(o.prices[d]).toLocaleString()}`).join(" · ")
+      : "";
   const svcCard = (o, i) =>
-    `<article class="item svc" data-cat="${esc(o.cat || "Wellness")}">${ph(o)}<div class="tx"><span class="cat">${esc(o.cat || "Wellness")}</span><h3>${esc(o.name)}</h3><p>${esc(o.desc)}</p></div><button class="go" data-k="s" data-i="${i}" aria-label="View service: ${esc(o.name)}"><span class="ai">${AR}</span></button></article>`;
+    `<article class="item svc" data-cat="${esc(o.cat || "Wellness")}">${ph(o)}<div class="tx"><span class="cat">${esc(o.cat || "Wellness")}</span><h3>${esc(o.name)}</h3><p>${esc(o.desc)}</p><span class="pr">${priceLine(o) ? esc(priceLine(o)) : "Ask the spa for details"}</span></div><button class="go" data-k="s" data-i="${i}" aria-label="View service: ${esc(o.name)}"><span class="ai">${AR}</span></button></article>`;
   const roomCard = (o, i, big) =>
-    `<article class="item ${big ? "rf" : "rs"}"><div class="rmi"><div class="zm">${ph(o)}</div></div><div class="rmt"><span class="eb">${/suite/i.test(o.name) ? "Suite" : "Room"}</span><h3>${esc(o.name)}</h3><p>${esc(o.desc)}</p><button class="ar" data-k="r" data-i="${i}" aria-label="Explore ${esc(o.name)}">Explore</button></div></article>`;
+    `<article class="item ${big ? "rf" : "rs"}"><div class="rmi" data-k="r" data-i="${i}"><div class="zm">${ph(o)}</div></div><div class="rmt"><span class="eb">${/suite/i.test(o.name) ? "Suite" : "Room"}</span><h3>${esc(o.name)}</h3><p>${esc(o.desc)}</p><button class="ar" data-k="r" data-i="${i}" aria-label="Explore ${esc(o.name)}">Explore</button></div></article>`;
   const set = (sel, html) => {
     const el = $(sel);
     if (el) el.innerHTML = html;
@@ -136,6 +143,10 @@
         );
       });
   }
+  $$("[data-fact]").forEach((el) => {
+    const v = CONFIG.contact[el.dataset.fact];
+    if (v) el.textContent = v;
+  });
   {
     const w = $("[data-wellness-photo]");
     if (w && CONFIG.wellness.img) {
@@ -143,19 +154,9 @@
       w.style.backgroundImage = `url('${CONFIG.wellness.img}')`;
     }
   }
-  set(
-    "[data-amenities]",
-    CONFIG.amenities && CONFIG.amenities.length
-      ? CONFIG.amenities.map((a) => `<li>${esc(a)}</li>`).join("")
-      : "<li>[Add room amenities here.]</li>",
-  );
-  set(
-    "[data-stayinfo]",
-    esc(
-      CONFIG.stayInfo ||
-        "[Add accommodation information here: check-in, policies, rates.]",
-    ),
-  );
+  // Text written in the dashboard replaces the default text already in the page; with nothing entered the page text stays.
+  if (CONFIG.amenities && CONFIG.amenities.length) set("[data-amenities]", CONFIG.amenities.map((a) => `<li>${esc(a)}</li>`).join(""));
+  if (CONFIG.stayInfo) set("[data-stayinfo]", esc(CONFIG.stayInfo));
   set(
     "#info",
     [
@@ -167,15 +168,17 @@
       .join(""),
   );
   set("#hours", `<li>${ic.cl}<div><b>Hours</b>${esc(C.hours)}</div></li>`);
-  set(
-    "#map",
-    C.mapQuery
-      ? `<iframe title="Map to Bella Vista Oasis Spa" loading="lazy" src="${/^https?:\/\//i.test(C.mapQuery) ? esc(C.mapQuery) : `https://www.google.com/maps?q=${encodeURIComponent(C.mapQuery)}&output=embed`}"></iframe>`
-      : `<iframe title="Map placeholder" srcdoc="<body style='margin:0;display:grid;place-items:center;height:100vh;font:14px sans-serif;color:#555;text-align:center'>Google Map appears here.<br>Set mapQuery in CONFIG.</body>"></iframe>`,
-  );
+  {
+    const q = C.mapQuery || C.address || "",
+      src = /^https?:\/\//i.test(q) ? q : `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`,
+      open = /^https?:\/\//i.test(q) ? "" : `https://www.google.com/maps?q=${encodeURIComponent(q)}`,
+      note = `<p class="mapnote">${esc(C.address)}${open ? ` <a href="${esc(open)}" target="_blank" rel="noopener">Open in Google Maps</a>` : ""}</p>`;
+    /* offline: the embedded map cannot load, so show the address as text instead of an empty box */
+    set("#map", (C.mapQuery && navigator.onLine !== false ? `<iframe title="Map to Bella Vista Oasis Spa" loading="lazy" src="${esc(src)}"></iframe>` : "") + note);
+  }
   {
     const fb = $("#fb");
-    if (fb) fb.href = C.facebook;
+    if (fb) { if (realSocial(C.facebook)) fb.href = C.facebook; else (fb.closest("li") || fb).hidden = true; }   // no link at all is better than a link to the generic Facebook home page
   }
   set(
     "#faqList",
@@ -217,6 +220,26 @@
     }
   }
   {
+    const t = [...(CONFIG.team || [])].sort((a, b) => (a.name || "").trim().localeCompare((b.name || "").trim(), undefined, { sensitivity: "base" })),
+      box = $("[data-team]");
+    if (box) {
+      box.hidden = !t.length;
+      const safe = (u) => (/^https:\/\//.test(u || "") ? esc(u) : "");
+      const grid = box.querySelector(".tm-grid");
+      grid.innerHTML = t
+        .map((m) => {
+          const links = [
+            m.email ? `<li><a href="mailto:${esc(m.email)}">Email</a></li>` : "",
+            safe(m.github) ? `<li><a href="${safe(m.github)}" target="_blank" rel="noopener">GitHub</a></li>` : "",
+            safe(m.linkedin) ? `<li><a href="${safe(m.linkedin)}" target="_blank" rel="noopener">LinkedIn</a></li>` : "",
+          ].join("");
+          const ph = /^assets\//.test(m.photo || "") ? `<img src="${esc(m.photo)}" alt="${esc(m.name)}" loading="lazy" onerror="this.remove()">` : "";
+          return `<article class="tm-card reveal"><div class="tm-ph">${ph}</div><h3>${esc(m.name)}</h3>${m.role ? `<p class="tm-role">${esc(m.role)}</p>` : ""}${m.bio ? `<p class="tm-bio">${esc(m.bio)}</p>` : ""}${links ? `<ul class="tm-links">${links}</ul>` : ""}</article>`;
+        })
+        .join("");
+    }
+  }
+  {
     const g = CONFIG.gallery || [];
     $$("[data-gallery]").forEach((box) => {
       const grid = box.querySelector(".gal");
@@ -247,13 +270,28 @@
     if (h && CONFIG.hero.img) {
       h.style.backgroundImage = `url('${CONFIG.hero.img}')`;
       $(".hero").classList.add("has");
+      /* crossfade slideshow: one layer per image, cycling is skipped for reduced motion or a single image */
+      const L = [CONFIG.hero.img, ...(CONFIG.hero.more || [])].map((u, k) => {
+        const i = document.createElement("i");
+        i.style.backgroundImage = `url('${u}')`;
+        i.className = k ? "" : "on";
+        h.append(i);
+        return i;
+      });
+      if (L.length > 1 && !matchMedia("(prefers-reduced-motion:reduce)").matches) {
+        let k = 0;
+        setInterval(() => {
+          L[k].classList.remove("on");
+          (k = (k + 1) % L.length), L[k].classList.add("on");
+        }, 6500);
+      }
     }
     const a = $(".ambg");
     if (a && CONFIG.ambiance.img) {
       a.style.backgroundImage = `url('${CONFIG.ambiance.img}')`;
       $(".amb").classList.add("has");
     }
-    const u = CONFIG.ambiance.img || CONFIG.hero.img,
+    const u = ((CONFIG.pageHeroes || {})[document.body.dataset.page]) || CONFIG.ambiance.img || CONFIG.hero.img,
       b = $(".pb");
     if (b && u) {
       b.querySelector(".pbg").style.backgroundImage = `url('${u}')`;
@@ -320,8 +358,11 @@
   /* ---------- dialogs ---------- */
   const d = $("#dlg");
   $("#dx").onclick = () => d.close();
-  const open = (t, x, q = true) => {
+  const open = (t, x, q = true, svc = "") => {
     $("#dt").textContent = t;
+    // "Send an inquiry" opens the booking form with this treatment already chosen (booking.js reads ?service=)
+    const [bookPage, bookHash] = String(SITE.bookHref).split("#");
+    $("#dq").href = svc ? bookPage + "?service=" + encodeURIComponent(svc) + (bookHash ? "#" + bookHash : "") : SITE.bookHref;
     if (typeof x === "string" && x.trim().startsWith("<")) {
       $("#db").innerHTML = x;
     } else {
@@ -350,8 +391,8 @@
    <h4 style="margin:12px 0 4px;color:var(--forest)">B. Booking &amp; Reservation Policies</h4>
    <p><strong>T&amp;C 05–08:</strong> All appointments are subject to room and therapist availability. Confirmation is sent via registered email. The spa reserves the right to review duplicate reservations.</p>
 
-   <h4 style="margin:12px 0 4px;color:var(--forest)">C. Payment Simulation Policies</h4>
-   <p><strong>T&amp;C 09–12:</strong> All payments processed through the website are strictly for demonstration and simulation purposes. The system does not collect actual money or process real financial transactions.</p>
+   <h4 style="margin:12px 0 4px;color:var(--forest)">C. Payment Policies</h4>
+   <p><strong>T&amp;C 09–12:</strong> Payments made through the website are recorded against your booking. Downpayments, refunds and cancellations follow the policies stated in these Terms and Conditions.</p>
 
    <h4 style="margin:12px 0 4px;color:var(--forest)">D. Locker &amp; Belongings</h4>
    <p><strong>T&amp;C 14 – Personal Belongings:</strong> Guests are encouraged to use the digital locker. A unique combination passcode is provided on the digital receipt. The passcode combination changes after every booking.</p>
@@ -385,11 +426,13 @@
       const o = (k.dataset.k == "r" ? CONFIG.rooms : CONFIG.services)[
         k.dataset.i
       ];
-      open(
-        o.name,
-        o.desc +
-          " Details and pricing have not been added yet. Send an inquiry to ask the spa.",
-      );
+      const more =
+        k.dataset.k == "s"
+          ? priceLine(o)
+            ? " Lengths and prices: " + priceLine(o) + "."
+            : " This treatment is not booked online: send an inquiry and the spa will reply."
+          : " The room is matched to your number of guests when you book, and the price follows the treatment you choose.";
+      open(o.name, o.desc + more, true, k.dataset.k == "s" ? o.name : "");
     }
     const l = e.target.closest("[data-doc]");
     if (l) {

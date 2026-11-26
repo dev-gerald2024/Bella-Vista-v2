@@ -72,7 +72,7 @@ const DB=(()=>{
   saveTherapistSchedule:(id,shifts)=>W("/api/admin/therapists/"+encodeURIComponent(id)+"/schedule",{shifts},"PUT"),
   addTherapistBreak:(id,d)=>W("/api/admin/therapists/"+encodeURIComponent(id)+"/breaks",d),
   addTherapistLeave:(id,d)=>W("/api/admin/therapists/"+encodeURIComponent(id)+"/leaves",d),
-  assignRoom:(bkId,roomId)=>W("/api/admin/bookings/"+encodeURIComponent(bkId)+"/assign-room",{roomId}),
+  assignRoom:(bkId,roomId,reason)=>W("/api/admin/bookings/"+encodeURIComponent(bkId)+"/assign-room",{roomId,reason:reason||""}),
   assignTherapist:(bkId,therapistId)=>W("/api/admin/bookings/"+encodeURIComponent(bkId)+"/assign-therapist",{therapistId}),
   setCleaningStatus:(id,status,cleanedBy,notes)=>W("/api/admin/cleanings/"+encodeURIComponent(id)+"/status",{status,cleanedBy,notes}),
   /* ---- Phase 6.0 admin writes ---- */
@@ -80,5 +80,7 @@ const DB=(()=>{
   confirmCashPayment:txnId=>W("/api/admin/transactions/"+encodeURIComponent(txnId)+"/confirm-cash"),
   processRefund:(bkId,amount,reason)=>W("/api/admin/bookings/"+encodeURIComponent(bkId)+"/refund",{amount,reason}),
   forfeitDownpayment:(bkId,reason)=>W("/api/admin/bookings/"+encodeURIComponent(bkId)+"/forfeit",{reason}),
+  uploadTeamPhoto:data=>W("/api/admin/team-photo",{data}),
+  runReminders:()=>W("/api/admin/reminders/run",{}),
   savePaymentSetting:(key,value)=>W("/api/admin/payments/settings",{key,value},"PUT")
  }})();

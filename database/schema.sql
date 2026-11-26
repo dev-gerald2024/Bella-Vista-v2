@@ -1,9 +1,16 @@
 -- ============================================================================
--- BELLA VISTA OASIS SPA - AUTHORITATIVE DATABASE SCHEMA
--- Version: 6.0 (Complete System Schema)
--- Environment: MySQL 8.0+ / MariaDB 10.4+ / XAMPP
--- Description: Complete, pure DDL structure without data.
---              Includes all 24 tables, indexes, constraints, view, and triggers.
+-- BELLA VISTA OASIS SPA - AUTHORITATIVE DATABASE SCHEMA (fresh install)
+-- Environment: MariaDB 10.4+ (XAMPP).  Migrations use MariaDB-only syntax
+--              (ADD COLUMN IF NOT EXISTS), so MySQL 8 is NOT supported for upgrades.
+-- Contains: all 24 tables, indexes, constraints, the userdata view, the role trigger
+--           and the schema_migrations tracking table. No data (see seed.sql).
+--
+-- SAFE TO RE-RUN: this file never drops or truncates anything. Every table uses
+-- CREATE TABLE IF NOT EXISTS, so importing it into an existing database leaves
+-- all customer, booking and payment data untouched. It does NOT upgrade old
+-- tables either: to upgrade an existing database use  php tools/migrate.php
+-- (see docs/DATABASE.md). To wipe a development database on purpose use
+-- database/dev-reset.sql, which is a separate, clearly labelled destructive file.
 -- ============================================================================
 
 CREATE DATABASE IF NOT EXISTS `bellavista` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -31,10 +38,9 @@ USE `bellavista`;
 -- Table structure for table `activity`
 --
 
-DROP TABLE IF EXISTS `activity`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `activity` (
+CREATE TABLE IF NOT EXISTS `activity` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int(10) unsigned NOT NULL,
   `text` varchar(500) NOT NULL,
@@ -42,17 +48,16 @@ CREATE TABLE `activity` (
   PRIMARY KEY (`id`),
   KEY `idx_act_user` (`user_id`),
   CONSTRAINT `fk_act_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=240 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `admin_log`
 --
 
-DROP TABLE IF EXISTS `admin_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `admin_log` (
+CREATE TABLE IF NOT EXISTS `admin_log` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `admin_id` int(10) unsigned DEFAULT NULL,
   `admin_name` varchar(100) NOT NULL DEFAULT '',
@@ -64,17 +69,16 @@ CREATE TABLE `admin_log` (
   KEY `idx_adminlog_admin` (`admin_id`),
   KEY `idx_adminlog_time` (`created_at`),
   CONSTRAINT `fk_adminlog_user` FOREIGN KEY (`admin_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=281 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `appointment_room_assignments`
 --
 
-DROP TABLE IF EXISTS `appointment_room_assignments`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `appointment_room_assignments` (
+CREATE TABLE IF NOT EXISTS `appointment_room_assignments` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `booking_id` int(10) unsigned NOT NULL,
   `room_id` int(10) unsigned NOT NULL,
@@ -91,17 +95,16 @@ CREATE TABLE `appointment_room_assignments` (
   KEY `idx_assign_booking` (`booking_id`),
   CONSTRAINT `fk_assign_room_booking` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`),
   CONSTRAINT `fk_assign_room_room` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `appointment_therapist_assignments`
 --
 
-DROP TABLE IF EXISTS `appointment_therapist_assignments`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `appointment_therapist_assignments` (
+CREATE TABLE IF NOT EXISTS `appointment_therapist_assignments` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `booking_id` int(10) unsigned NOT NULL,
   `therapist_id` int(10) unsigned NOT NULL,
@@ -117,17 +120,16 @@ CREATE TABLE `appointment_therapist_assignments` (
   KEY `idx_assign_therapist_bk` (`booking_id`),
   CONSTRAINT `fk_assign_therapist_bk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`),
   CONSTRAINT `fk_assign_therapist_th` FOREIGN KEY (`therapist_id`) REFERENCES `therapists` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `bookings`
 --
 
-DROP TABLE IF EXISTS `bookings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `bookings` (
+CREATE TABLE IF NOT EXISTS `bookings` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int(10) unsigned DEFAULT NULL,
   `name` varchar(100) NOT NULL DEFAULT '',
@@ -152,7 +154,7 @@ CREATE TABLE `bookings` (
   `original_time` varchar(5) DEFAULT NULL,
   `rescheduled_at` datetime DEFAULT NULL,
   `rescheduled_by` varchar(50) DEFAULT NULL,
-  `room_id` varchar(20) DEFAULT NULL,
+  `room_id` varchar(20) DEFAULT NULL COMMENT 'Room CODE (rooms.room_code), e.g. SR-1. Source of truth for time conflicts: appointment_room_assignments (numeric rooms.id)',
   `therapist_id` int(10) unsigned DEFAULT NULL,
   `package_id` int(10) unsigned DEFAULT NULL,
   `archived` tinyint(1) NOT NULL DEFAULT 0,
@@ -171,17 +173,16 @@ CREATE TABLE `bookings` (
   KEY `idx_bookings_therapist` (`therapist_id`),
   KEY `idx_bookings_package` (`package_id`),
   CONSTRAINT `fk_bookings_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=10086 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `content`
 --
 
-DROP TABLE IF EXISTS `content`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `content` (
+CREATE TABLE IF NOT EXISTS `content` (
   `content_key` varchar(50) NOT NULL,
   `json` longtext NOT NULL,
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
@@ -193,10 +194,9 @@ CREATE TABLE `content` (
 -- Table structure for table `favorites`
 --
 
-DROP TABLE IF EXISTS `favorites`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `favorites` (
+CREATE TABLE IF NOT EXISTS `favorites` (
   `user_id` int(10) unsigned NOT NULL,
   `item_key` varchar(190) NOT NULL,
   PRIMARY KEY (`user_id`,`item_key`),
@@ -208,10 +208,9 @@ CREATE TABLE `favorites` (
 -- Table structure for table `notifications`
 --
 
-DROP TABLE IF EXISTS `notifications`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `notifications` (
+CREATE TABLE IF NOT EXISTS `notifications` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int(10) unsigned NOT NULL,
   `text` varchar(500) NOT NULL,
@@ -220,17 +219,16 @@ CREATE TABLE `notifications` (
   PRIMARY KEY (`id`),
   KEY `idx_notif_user` (`user_id`),
   CONSTRAINT `fk_notif_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=236 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `packages`
 --
 
-DROP TABLE IF EXISTS `packages`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `packages` (
+CREATE TABLE IF NOT EXISTS `packages` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `package_code` varchar(30) NOT NULL,
   `name` varchar(150) NOT NULL,
@@ -251,17 +249,16 @@ CREATE TABLE `packages` (
   KEY `idx_packages_category` (`category_code`),
   KEY `idx_packages_status` (`package_status`),
   CONSTRAINT `fk_packages_category` FOREIGN KEY (`category_code`) REFERENCES `room_categories` (`code`) ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `payment_settings`
 --
 
-DROP TABLE IF EXISTS `payment_settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `payment_settings` (
+CREATE TABLE IF NOT EXISTS `payment_settings` (
   `setting_key` varchar(50) NOT NULL,
   `setting_value` varchar(255) NOT NULL,
   `description` varchar(255) DEFAULT NULL,
@@ -274,10 +271,9 @@ CREATE TABLE `payment_settings` (
 -- Table structure for table `reschedule_requests`
 --
 
-DROP TABLE IF EXISTS `reschedule_requests`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `reschedule_requests` (
+CREATE TABLE IF NOT EXISTS `reschedule_requests` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `booking_id` int(10) unsigned NOT NULL,
   `user_id` int(10) unsigned DEFAULT NULL,
@@ -296,17 +292,16 @@ CREATE TABLE `reschedule_requests` (
   KEY `idx_resched_user` (`user_id`),
   CONSTRAINT `fk_resched_booking` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`),
   CONSTRAINT `fk_resched_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `reviews`
 --
 
-DROP TABLE IF EXISTS `reviews`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `reviews` (
+CREATE TABLE IF NOT EXISTS `reviews` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `booking_id` int(10) unsigned NOT NULL,
   `user_id` int(10) unsigned DEFAULT NULL,
@@ -326,10 +321,9 @@ CREATE TABLE `reviews` (
 -- Table structure for table `room_categories`
 --
 
-DROP TABLE IF EXISTS `room_categories`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `room_categories` (
+CREATE TABLE IF NOT EXISTS `room_categories` (
   `code` varchar(20) NOT NULL,
   `name` varchar(100) NOT NULL,
   `min_guests` int(10) unsigned NOT NULL DEFAULT 1,
@@ -347,10 +341,9 @@ CREATE TABLE `room_categories` (
 -- Table structure for table `room_cleaning`
 --
 
-DROP TABLE IF EXISTS `room_cleaning`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `room_cleaning` (
+CREATE TABLE IF NOT EXISTS `room_cleaning` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `room_id` int(10) unsigned NOT NULL,
   `booking_id` int(10) unsigned DEFAULT NULL,
@@ -367,17 +360,16 @@ CREATE TABLE `room_cleaning` (
   KEY `fk_clean_booking` (`booking_id`),
   CONSTRAINT `fk_clean_booking` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_clean_room` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `room_maintenance`
 --
 
-DROP TABLE IF EXISTS `room_maintenance`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `room_maintenance` (
+CREATE TABLE IF NOT EXISTS `room_maintenance` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `room_id` int(10) unsigned NOT NULL,
   `start_date` varchar(10) NOT NULL,
@@ -391,17 +383,16 @@ CREATE TABLE `room_maintenance` (
   PRIMARY KEY (`id`),
   KEY `idx_maint_dates` (`room_id`,`start_date`,`end_date`),
   CONSTRAINT `fk_maint_room` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `rooms`
 --
 
-DROP TABLE IF EXISTS `rooms`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `rooms` (
+CREATE TABLE IF NOT EXISTS `rooms` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `room_code` varchar(20) NOT NULL,
   `room_name` varchar(100) NOT NULL,
@@ -418,17 +409,16 @@ CREATE TABLE `rooms` (
   KEY `idx_rooms_category` (`category_code`),
   KEY `idx_rooms_status` (`room_status`),
   CONSTRAINT `fk_rooms_category` FOREIGN KEY (`category_code`) REFERENCES `room_categories` (`code`) ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `sessions`
 --
 
-DROP TABLE IF EXISTS `sessions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `sessions` (
+CREATE TABLE IF NOT EXISTS `sessions` (
   `token_hash` char(64) NOT NULL,
   `user_id` int(10) unsigned NOT NULL,
   `created_at` bigint(20) NOT NULL,
@@ -444,10 +434,9 @@ CREATE TABLE `sessions` (
 -- Table structure for table `therapist_breaks`
 --
 
-DROP TABLE IF EXISTS `therapist_breaks`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `therapist_breaks` (
+CREATE TABLE IF NOT EXISTS `therapist_breaks` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `therapist_id` int(10) unsigned NOT NULL,
   `break_date` varchar(10) DEFAULT NULL,
@@ -459,17 +448,16 @@ CREATE TABLE `therapist_breaks` (
   PRIMARY KEY (`id`),
   KEY `idx_break_lookup` (`therapist_id`,`break_date`,`start_time`),
   CONSTRAINT `fk_break_therapist` FOREIGN KEY (`therapist_id`) REFERENCES `therapists` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `therapist_leaves`
 --
 
-DROP TABLE IF EXISTS `therapist_leaves`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `therapist_leaves` (
+CREATE TABLE IF NOT EXISTS `therapist_leaves` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `therapist_id` int(10) unsigned NOT NULL,
   `start_date` varchar(10) NOT NULL,
@@ -481,17 +469,16 @@ CREATE TABLE `therapist_leaves` (
   PRIMARY KEY (`id`),
   KEY `idx_leave_dates` (`therapist_id`,`start_date`,`end_date`),
   CONSTRAINT `fk_leave_therapist` FOREIGN KEY (`therapist_id`) REFERENCES `therapists` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `therapist_schedules`
 --
 
-DROP TABLE IF EXISTS `therapist_schedules`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `therapist_schedules` (
+CREATE TABLE IF NOT EXISTS `therapist_schedules` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `therapist_id` int(10) unsigned NOT NULL,
   `day_of_week` tinyint(3) unsigned NOT NULL,
@@ -503,17 +490,16 @@ CREATE TABLE `therapist_schedules` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_therapist_day` (`therapist_id`,`day_of_week`),
   CONSTRAINT `fk_sched_therapist` FOREIGN KEY (`therapist_id`) REFERENCES `therapists` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=59 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `therapists`
 --
 
-DROP TABLE IF EXISTS `therapists`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `therapists` (
+CREATE TABLE IF NOT EXISTS `therapists` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `employee_code` varchar(30) NOT NULL,
   `full_name` varchar(100) NOT NULL,
@@ -528,17 +514,16 @@ CREATE TABLE `therapists` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_therapist_code` (`employee_code`),
   KEY `idx_therapist_status` (`employment_status`,`availability_status`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `tokens`
 --
 
-DROP TABLE IF EXISTS `tokens`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `tokens` (
+CREATE TABLE IF NOT EXISTS `tokens` (
   `token_hash` char(64) NOT NULL,
   `user_id` int(10) unsigned NOT NULL,
   `purpose` varchar(20) NOT NULL,
@@ -553,10 +538,9 @@ CREATE TABLE `tokens` (
 -- Table structure for table `transactions`
 --
 
-DROP TABLE IF EXISTS `transactions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `transactions` (
+CREATE TABLE IF NOT EXISTS `transactions` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `transaction_reference` varchar(40) DEFAULT NULL,
   `user_id` int(10) unsigned DEFAULT NULL,
@@ -580,34 +564,16 @@ CREATE TABLE `transactions` (
   KEY `idx_txn_booking` (`booking_id`),
   CONSTRAINT `fk_txn_booking` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`),
   CONSTRAINT `fk_txn_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=211 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Temporary table structure for view `userdata`
---
-
-DROP TABLE IF EXISTS `userdata`;
-/*!50001 DROP VIEW IF EXISTS `userdata`*/;
-SET @saved_cs_client     = @@character_set_client;
-SET character_set_client = utf8mb4;
-/*!50001 CREATE VIEW `userdata` AS SELECT
- 1 AS `id`,
-  1 AS `username`,
-  1 AS `email`,
-  1 AS `password_hash`,
-  1 AS `created_at`,
-  1 AS `updated_at` */;
-SET character_set_client = @saved_cs_client;
 
 --
 -- Table structure for table `users`
 --
 
-DROP TABLE IF EXISTS `users`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `users` (
+CREATE TABLE IF NOT EXISTS `users` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `full_name` varchar(100) NOT NULL,
   `email` varchar(254) NOT NULL,
@@ -624,7 +590,7 @@ CREATE TABLE `users` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_users_email` (`email`),
   KEY `idx_users_role` (`role`)
-) ENGINE=InnoDB AUTO_INCREMENT=64 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
 /*!50003 SET @saved_cs_results     = @@character_set_results */ ;
@@ -636,7 +602,7 @@ CREATE TABLE `users` (
 /*!50003 SET sql_mode              = 'NO_AUTO_VALUE_ON_ZERO' */ ;
 DELIMITER ;;
 DROP TRIGGER IF EXISTS `trg_users_role_log`;
-/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER `trg_users_role_log` AFTER UPDATE ON `users` FOR EACH ROW
+/*!50003 CREATE*/ /*!50003 TRIGGER `trg_users_role_log` AFTER UPDATE ON `users` FOR EACH ROW
   INSERT INTO `admin_log` (`admin_id`, `admin_name`, `action`, `target`, `detail`, `created_at`)
   SELECT NULL, 'Database', 'Role changed', NEW.`email`, CONCAT(OLD.`role`, ' -> ', NEW.`role`), UTC_TIMESTAMP()
   FROM DUAL WHERE OLD.`role` <> NEW.`role` */;;
@@ -654,19 +620,42 @@ DELIMITER ;
 -- Final view structure for view `userdata`
 --
 
-/*!50001 DROP VIEW IF EXISTS `userdata`*/;
+
 /*!50001 SET @saved_cs_client          = @@character_set_client */;
 /*!50001 SET @saved_cs_results         = @@character_set_results */;
 /*!50001 SET @saved_col_connection     = @@collation_connection */;
 /*!50001 SET character_set_client      = utf8mb4 */;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
-/*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 CREATE OR REPLACE ALGORITHM=UNDEFINED */
 /*!50001 VIEW `userdata` AS select `users`.`id` AS `id`,`users`.`full_name` AS `username`,`users`.`email` AS `email`,`users`.`password_hash` AS `password_hash`,`users`.`created_at` AS `created_at`,`users`.`updated_at` AS `updated_at` from `users` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
+
+-- ---- Migration tracking -----------------------------------------------------
+-- A fresh install is already at the latest structure, so every migration that is
+-- bundled in database/migrations/ is recorded as applied. 008 (database user) is an
+-- optional manual hardening script and is deliberately not tracked.
+CREATE TABLE IF NOT EXISTS `schema_migrations` (
+  `version`    VARCHAR(20)  NOT NULL,
+  `name`       VARCHAR(150) NOT NULL,
+  `checksum`   CHAR(64)     NULL,
+  `applied_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `applied_by` VARCHAR(60)  NOT NULL DEFAULT 'schema.sql',
+  PRIMARY KEY (`version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+INSERT IGNORE INTO `schema_migrations` (`version`, `name`) VALUES
+  ('001','001_initial_schema'),
+  ('002','002_roles_and_audit'),
+  ('003','003_double_booking_protection'),
+  ('004','004_features_reschedule_reviews'),
+  ('005','005_phase4.1_scheduling_and_cancellation'),
+  ('006','006_phase5.0_rooms_packages_therapists'),
+  ('007','007_phase6.0_demo_payments_and_refunds'),
+  ('009','009_reconcile_legacy_schema'),
+  ('010','010_room_reference_consistency');
+
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

@@ -6,8 +6,13 @@ AddDefaultCharset UTF-8
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
+  # retired Phase 2: the old standalone PHP login/register/reset pages now go to the current pages
+  RewriteRule ^login\.php$ login.html [R=301,L]
+  RewriteRule ^register\.php$ register.html [R=301,L]
+  RewriteRule ^resetpassword\.php$ forgot.html [R=301,L]
+
   # never serve PHP libraries, database scripts, the data folder, docs, backups, old Node files or dotfiles
-  RewriteRule ^(php|data|database|docs|archive|server|_backup|node_modules)(/|$) - [R=404,L]
+  RewriteRule ^(php|data|database|docs|tools|tests|archive|server|_backup|node_modules)(/|$) - [R=404,L]
   RewriteRule \.(sql|md|env|db|log|bat|lock)$ - [R=404,L]
   RewriteRule (^|/)package(-lock)?\.json$ - [R=404,L]
   RewriteRule \.backup\.html$ - [R=404,L]
@@ -23,7 +28,7 @@ AddDefaultCharset UTF-8
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "DENY"
   Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
-  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-qOhFsq0QMV2REqNwk5hGH5bZE9SkX6gt6yeyKdYPv+U='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; frame-src https://www.google.com 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' mailto:; object-src 'none'"
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; frame-src https://www.google.com 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' mailto:; object-src 'none'"
   Header always set Strict-Transport-Security "max-age=15552000; includeSubDomains" "expr=%{HTTPS} == 'on'"
 </IfModule>
 

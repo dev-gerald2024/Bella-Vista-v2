@@ -7,7 +7,7 @@ require_once __DIR__ . '/payments.php';
 
 const STATUSES = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO-SHOW', 'REJECTED'];
 const PREFS = ['bookingReminders' => true, 'emailNotifications' => true, 'promotions' => false];
-const CONTENT_KEYS = ['services', 'rooms', 'wellness', 'faqs', 'content', 'gallery', 'log'];
+const CONTENT_KEYS = ['services', 'rooms', 'wellness', 'faqs', 'content', 'gallery', 'team', 'log'];
 const REASONS = ['Schedule conflict', 'Change of plans', 'Found another time', 'Other'];
 const CONTACTS = ['', 'Email', 'Phone call', 'SMS'];
 const TXQ = 'SELECT t.*,b.created_at AS bcreated FROM transactions t JOIN bookings b ON b.id=t.booking_id';
@@ -50,6 +50,8 @@ function shape_booking(array $r): array {
     'therapistId'        => !empty($r['therapist_id']) ? (int)$r['therapist_id'] : null,
     'therapistName'      => $r['therapist_name'] ?? null,
     'packageId'          => !empty($r['package_id']) ? (int)$r['package_id'] : null,
+    'packageName'        => $r['package_name'] ?? null,
+    'packageCode'        => $r['package_code'] ?? null,
     'paymentStatus'      => $r['payment_status'] ?? 'UNPAID',
     'paidAmount'         => (float)($r['paid_amount'] ?? 0.0),
     'downpaymentRequired'=> (float)($r['downpayment_required'] ?? 0.0),
@@ -68,8 +70,8 @@ function shape_txn(array $r): array {
     'id'                 => 'TXN-' . yr($r) . '-' . pad($r['id']),
     'numericId'          => (int)$r['id'],
     'rawId'              => (int)$r['id'],
-    'transactionRef'     => $r['transaction_reference'] ?? ('TXN-' . yr($r) . '-' . pad($r['id'])),
-    'transaction_reference' => $r['transaction_reference'] ?? ('TXN-' . yr($r) . '-' . pad($r['id'])),
+    'transactionRef'     => clean_ref($r['transaction_reference'] ?? null) ?? ('TXN-' . yr($r) . '-' . pad($r['id'])),
+    'transaction_reference' => clean_ref($r['transaction_reference'] ?? null) ?? ('TXN-' . yr($r) . '-' . pad($r['id'])),
     'customerId'         => $r['user_id'] ? cus_ref($r['user_id']) : '',
     'bookingId'          => 'BK-' . substr((string)($r['bcreated'] ?? $r['created_at']), 0, 4) . '-' . pad($r['booking_id']),
     'rawBookingId'       => (int)$r['booking_id'],
@@ -79,9 +81,8 @@ function shape_txn(array $r): array {
     'payment_method'     => $r['payment_method'] ?? 'CASH_AT_SPA',
     'paymentMethodLabel' => format_payment_method($r['payment_method'] ?? 'CASH_AT_SPA'),
     'transactionType'    => $r['transaction_type'] ?? 'DOWNPAYMENT',
-    'receiptNumber'      => $r['receipt_number'] ?? null,
-    'receipt_number'     => $r['receipt_number'] ?? null,
-    'demoMode'           => true,
+    'receiptNumber'      => clean_ref($r['receipt_number'] ?? null),
+    'receipt_number'     => clean_ref($r['receipt_number'] ?? null),
     'notes'              => $r['notes'] ?? '',
     'refundReason'       => $r['refund_reason'] ?? '',
     'processedAt'        => !empty($r['processed_at']) ? iso($r['processed_at']) : null,
@@ -119,7 +120,7 @@ function set_status(int $id, string $status, string $reason = '', ?string $by = 
   run($sql, $params);
   $b = q1('SELECT * FROM bookings WHERE id=?', [$id]);
   $m = [
-    'CONFIRMED'   => ['Reservation confirmed', 'Your reservation has been confirmed.'],
+    'CONFIRMED'   => ['Reservation confirmed', 'Your reservation has been confirmed. You can now pay your downpayment from My Account.'],
     'IN_PROGRESS' => ['Treatment in progress', 'Your treatment session is now in progress.'],
     'COMPLETED'   => ['Booking completed', 'Thank you for visiting. Your booking is completed.'],
     'CANCELLED'   => ['Reservation cancelled', 'Your reservation was cancelled.'],
@@ -134,9 +135,9 @@ function set_status(int $id, string $status, string $reason = '', ?string $by = 
 
     // Phase 6: Late cancellation check for downpayment forfeiture (< 24 hours notice)
     if ($status === 'CANCELLED' && !empty($b['preferred_date']) && !empty($b['time'])) {
-      $apptT = strtotime($b['preferred_date'] . ' ' . $b['time']);
+      $apptT = appt_ts($b['preferred_date'], $b['time']);   // Manila time, not the PHP server's timezone
       $diffH = ($apptT - time()) / 3600.0;
-      if ($diffH < 24.0) {
+      if ($diffH < 24.0 && late_forfeiture_enabled()) {
         forfeit_demo_downpayment($id, 'Late cancellation (< 24h notice)', $by ?: 'SYSTEM');
       }
     }
@@ -186,6 +187,7 @@ function api_create_booking(array $user, array $b): void {
 
   // BR-11, BR-50: Calculate official booking amount from service, duration, and guests
   $amount = get_service_price($service, (int)$dur, $guests);
+  if ($amount <= 0) fail("No price is configured for $service ($dur min). Please contact the spa.", 400, ['field' => 'duration', 'code' => 'price_not_configured']);
 
   // Protection against duplicate booking submissions
   $dup = q1("SELECT id FROM bookings WHERE user_id=? AND service=? AND preferred_date=? AND time=? AND created_at >= (UTC_TIMESTAMP() - INTERVAL 60 SECOND)",
@@ -199,60 +201,43 @@ function api_create_booking(array $user, array $b): void {
   $row = guard_slot($date, $time, $service, $dur, null, true, function () use ($user, $service, $date, $time, $dur, $guests, $amount, $phone, $msg, $t, $b) {
     $uName = $user['fullName'] ?? $user['full_name'] ?? 'Guest';
 
-    // Resolve room selection or dynamic recommendation
+    // The room is decided on the server: a room the customer picked must be valid, free and large enough, otherwise
+    // the booking is refused. Nothing is ever swapped for another room without telling the customer.
     $reqRoom = trim((string)($b['selectedRoomCode'] ?? $b['roomCode'] ?? $b['selectedRoomId'] ?? $b['roomId'] ?? $b['accommodation'] ?? 'auto'));
-    $assignedRoomCode = null;
-    $assignedRoomId = null;
+    $rm = resolve_booking_room($reqRoom, $service, (int)$dur, (int)$guests, $date, $time);
+    $assignedRoomCode = $rm['room_code'];
+    $assignedRoomId = (int)$rm['id'];
+    $pkg = resolve_booking_package($b, $rm, (int)$guests);
+    $total = booking_total_with_package((float)$amount, $pkg, (int)$guests);
 
-    if ($reqRoom !== '' && $reqRoom !== 'auto') {
-      $rm = is_numeric($reqRoom) ? get_room_by_id((int)$reqRoom) : get_room_by_code($reqRoom);
-      if (!$rm) {
-        $catCode = ($reqRoom === 'Single Room Massage' || $reqRoom === 'SINGLE') ? 'SINGLE' : (($reqRoom === 'Couples Suite' || $reqRoom === 'COUPLES') ? 'COUPLES' : (($reqRoom === 'Family Spa Lounge' || $reqRoom === 'FAMILY') ? 'FAMILY' : ''));
-        if ($catCode) {
-          $candidates = qa("SELECT * FROM rooms WHERE category_code=? AND room_status='AVAILABLE'", [$catCode]);
-          foreach ($candidates as $cand) {
-            $chk = is_room_available((int)$cand['id'], $date, $time, (int)$dur);
-            if ($chk['ok']) { $rm = $cand; break; }
-          }
-          if (!$rm && !empty($candidates)) $rm = $candidates[0];
-        }
-      }
-      if ($rm) {
-        $assignedRoomCode = $rm['room_code'];
-        $assignedRoomId = (int)$rm['id'];
-      }
-    }
-
-    if (!$assignedRoomId) {
-      $rec = get_room_recommendations($service, (int)$dur, (int)$guests, $date, $time);
-      if ($rec['ok'] && !empty($rec['recommended'])) {
-        $assignedRoomCode = $rec['recommended']['roomCode'];
-        $assignedRoomId = (int)$rec['recommended']['id'];
-      }
-    }
-
-    run('INSERT INTO bookings(user_id,name,email,service,preferred_date,time,duration,guests,amount,phone,message,status,room_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [$user['id'], $uName, $user['email'], $service, $date, $time, $dur, $guests, $amount, $phone, $msg, 'PENDING', $assignedRoomCode, $t, $t]);
+    run('INSERT INTO bookings(user_id,name,email,service,preferred_date,time,duration,guests,amount,phone,message,status,room_id,package_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [$user['id'], $uName, $user['email'], $service, $date, $time, $dur, $guests, $total, $phone, $msg, 'PENDING', $assignedRoomCode, $pkg['id'] ?? null, $t, $t]);
     $newBk = q1('SELECT * FROM bookings WHERE id=?', [last_id()]);
+    if (!$newBk) throw new RuntimeException('The reservation could not be saved.');
 
-    if ($newBk && $assignedRoomId) {
-      try {
-        $sMin = hm_to_min($time);
-        $eMin = $sMin + (int)$dur;
-        $cMin = $eMin + buffer_minutes();
-        $endTime = min_to_hm($eMin);
-        $cleanEndTime = min_to_hm($cMin);
-
-        run('INSERT INTO appointment_room_assignments (booking_id, room_id, assigned_date, start_time, end_time, cleaning_end_time, status, assigned_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [$newBk['id'], $assignedRoomId, $date, $time, $endTime, $cleanEndTime, 'ASSIGNED', 'Online Booking']);
-        run('INSERT INTO room_cleaning (room_id, booking_id, cleaning_date, start_time, end_time, status, cleaned_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [$assignedRoomId, $newBk['id'], $date, $endTime, $cleanEndTime, 'SCHEDULED', '', 'Automated post-treatment sanitization (30 min buffer)']);
-      } catch (Throwable $ignore) {}
+    // These writes are part of the same transaction as the booking. If any of them fails nothing is kept and the
+    // customer gets an error, instead of a reservation without a room.
+    $sMin = hm_to_min($time);
+    $eMin = $sMin + (int)$dur;
+    $endTime = min_to_hm($eMin);
+    $cleanEndTime = min_to_hm($eMin + buffer_minutes());
+    try {
+      run('INSERT INTO appointment_room_assignments (booking_id, room_id, assigned_date, start_time, end_time, cleaning_end_time, status, assigned_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [$newBk['id'], $assignedRoomId, $date, $time, $endTime, $cleanEndTime, 'ASSIGNED', 'Online Booking']);
+      run('INSERT INTO room_cleaning (room_id, booking_id, cleaning_date, start_time, end_time, status, cleaned_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [$assignedRoomId, $newBk['id'], $date, $endTime, $cleanEndTime, 'SCHEDULED', '', 'Automated post-treatment sanitization (30 min buffer)']);
+      calculate_booking_payment_summary((int)$newBk['id']);   // fixes the amount, downpayment and payment status from the start
+    } catch (Throwable $e) {
+      error_log('[bellavista] booking resource assignment failed: ' . $e->getMessage());
+      throw $e;
     }
+    $newBk = q1('SELECT * FROM bookings WHERE id=?', [$newBk['id']]);
 
     return $newBk;
   }, (int)$user['id']);
 
+  // First booking saves the number to the customer's profile; later bookings prefill it. A different number on a later booking is used for that booking only.
+  run("UPDATE users SET phone=? WHERE id=? AND (phone IS NULL OR phone='')", [$phone, $user['id']]);
   $ref = bk_ref($row);
   booking_created($row);
   $to = (string)cfg('NOTIFY_EMAIL');
@@ -260,7 +245,47 @@ function api_create_booking(array $user, array $b): void {
     try { send_mail($to, 'New appointment request ' . $ref, "{$user['fullName']} <{$user['email']}>\nPhone: $phone\nService: $service\nDuration: {$dur} min\nGuests: $guests\nAmount: ₱" . number_format($amount, 2) . "\nPreferred date: $date $time\n\n$msg"); }
     catch (Throwable $e) { error_log('notify error: ' . $e->getMessage()); }
   }
-  out(['ok' => true, 'booking' => ['id' => $ref, 'service' => $service, 'date' => $date, 'time' => $time, 'duration' => $dur, 'guests' => $guests, 'amount' => $amount, 'roomId' => $row['room_id'] ?? null, 'status' => 'PENDING']], 201);
+  out(['ok' => true, 'booking' => ['id' => $ref, 'service' => $service, 'date' => $date, 'time' => $time, 'duration' => $dur, 'guests' => $guests, 'amount' => (float)$row['amount'], 'roomId' => $row['room_id'] ?? null, 'packageId' => !empty($row['package_id']) ? (int)$row['package_id'] : null, 'status' => 'PENDING']], 201);
+}
+/* Authoritative price preview for the booking form: the same functions api_create_booking() uses, so what the customer
+   confirms is what is stored. Read-only; no room availability is checked here (that happens when the booking is saved). */
+function api_booking_quote(array $q): void {
+  $service = !empty($q['service']) ? clean_name($q['service']) : '';
+  $vd = validate_service_duration($service, $q['duration'] ?? null, true);
+  if (!$vd['ok']) fail($vd['error'], 400, ['field' => $vd['field'], 'code' => $vd['code']]);
+  $vg = validate_guests($q['guests'] ?? 1);
+  if (!$vg['ok']) fail($vg['error'], 400, ['field' => $vg['field'], 'code' => $vg['code']]);
+  $dur = (int)$vd['minutes']; $guests = (int)$vg['guests'];
+  $treatment = get_service_price($service, $dur, $guests);
+  if ($treatment <= 0) fail("No price is configured for $service ($dur min).", 400, ['field' => 'duration', 'code' => 'price_not_configured']);
+  $pkg = null;
+  $req = trim((string)($q['roomCode'] ?? ''));
+  if ($req !== '' && strtolower($req) !== 'auto') {
+    $rm = ctype_digit($req) ? get_room_by_id((int)$req) : get_room_by_code(strtoupper($req));
+    if ($rm) $pkg = resolve_booking_package($q, $rm, $guests);
+  } else {
+    // room still "auto": the booking save links an explicitly sent package (its category is checked against the room it picks)
+    $ref = trim((string)($q['packageCode'] ?? ''));
+    if ($ref !== '') {
+      $pkg = get_package_by_code(strtoupper($ref));
+      if (!$pkg || $pkg['package_status'] !== 'ACTIVE') fail('The selected package is not available right now.', 409, ['field' => 'package', 'code' => 'package_inactive']);
+      if ($guests < (int)$pkg['min_guests'] || $guests > (int)$pkg['max_capacity']) fail("Package {$pkg['name']} does not fit $guests guest(s).", 400, ['field' => 'package', 'code' => 'package_capacity']);
+    }
+  }
+  $total = booking_total_with_package($treatment, $pkg, $guests);
+  $dp = required_downpayment($total);
+  out(['ok' => true, 'quote' => [
+    'service' => $service, 'duration' => $dur, 'guests' => $guests,
+    'treatmentAmount' => round($treatment, 2),
+    'packageAmount' => round($total - $treatment, 2), 'packageName' => $pkg['name'] ?? null,
+    'totalAmount' => $total, 'downpaymentRequired' => $dp, 'balanceDue' => round($total - $dp, 2),
+    'downpaymentPercentage' => get_downpayment_setting(), 'minDownpayment' => get_min_downpayment(),
+  ]]);
+}
+/* The customer's most recent booking (any status), used to pre-fill the next booking form. */
+function api_last_booking(array $user): void {
+  $r = q1("SELECT service, duration, message FROM bookings WHERE user_id=? AND service<>'' AND service<>'Not sure yet' ORDER BY id DESC LIMIT 1", [$user['id']]);
+  out(['ok' => true, 'last' => $r ? ['service' => $r['service'], 'duration' => (string)$r['duration'], 'message' => (string)$r['message']] : null]);
 }
 function api_list_my_bookings(array $user): void {
   $rows = qa('SELECT id,service,preferred_date AS date,time,status,created_at FROM bookings WHERE user_id=? ORDER BY id DESC', [$user['id']]);
@@ -295,6 +320,14 @@ function portal_profile(array $user, array $b): void {
   act($user['id'], 'Profile updated');
   portal_fresh($user);
 }
+/* The customer chose to make the number from a booking their default. Only the phone changes. */
+function portal_set_phone(array $user, array $b): void {
+  $phone = trim(str($b['phone'] ?? ''));
+  if (!is_phone($phone)) fail('Phone number must contain 11 digits (09…) or 12 digits (639…).', 400, ['field' => 'phone']);
+  run('UPDATE users SET phone=? WHERE id=?', [format_phone($phone), $user['id']]);
+  act($user['id'], 'Default phone number updated');
+  portal_fresh($user);
+}
 function portal_preferences(array $user, array $b): void {
   $p = []; foreach (PREFS as $k => $d) $p[$k] = is_bool($b[$k] ?? null) ? $b[$k] : $d;
   run('UPDATE users SET prefs=? WHERE id=?', [json_encode($p), $user['id']]);
@@ -316,16 +349,20 @@ function portal_cancel(array $user, string $ref, array $b): void {
 
   $r = clean_text($b['reason'] ?? 'Customer cancelled online', 300);
 
-  // Check if booking has confirmed payments to automatically process full refund to original payment method
-  $summary = calculate_booking_payment_summary((int)$row['id']);
-  $refundResult = null;
-  if ($summary['netPaid'] > 0) {
-    $origTxn = q1("SELECT payment_method FROM transactions WHERE booking_id = ? AND status = 'PAID' AND transaction_type IN ('DOWNPAYMENT', 'BALANCE_PAYMENT', 'FULL_PAYMENT') ORDER BY id DESC LIMIT 1", [(int)$row['id']]);
-    $refundMethod = $origTxn['payment_method'] ?? 'GCASH_DEMO';
-    $refundResult = process_demo_refund((int)$row['id'], (float)$summary['netPaid'], 'Customer cancellation refund: ' . $r, 'CUSTOMER', $refundMethod);
-  }
+  // One request at a time per booking; re-read the booking now that the lock is held.
+  $lock = booking_lock((int)$row['id']);
+  $row = q1('SELECT * FROM bookings WHERE id=? AND user_id=?', [$id, $user['id']]);
+  if (!$row || !in_array($row['status'], ['PENDING', 'CONFIRMED'], true)) fail('This appointment was already changed. Please refresh.', 409);
 
-  set_status((int)$row['id'], 'CANCELLED', $r, 'CUSTOMER');
+  // The booking is cancelled FIRST, then any money paid is refunded (so the customer sees "cancelled" before "refund").
+  // Both steps are one transaction: a failed refund also undoes the cancellation.
+  $refundResult = tx(function () use ($row, $r) {
+    set_status((int)$row['id'], 'CANCELLED', $r, 'CUSTOMER');
+    $summary = calculate_booking_payment_summary((int)$row['id']);
+    if ($summary['netPaid'] <= 0) return null;
+    $origTxn = q1("SELECT payment_method FROM transactions WHERE booking_id = ? AND status = 'PAID' AND transaction_type IN ('DOWNPAYMENT', 'BALANCE_PAYMENT', 'FULL_PAYMENT') ORDER BY id DESC LIMIT 1", [(int)$row['id']]);
+    return process_demo_refund((int)$row['id'], (float)$summary['netPaid'], 'Customer cancellation refund: ' . $r, 'CUSTOMER', $origTxn['payment_method'] ?? 'GCASH_DEMO');
+  });
   portal_fresh($user, $refundResult ? ['refund' => $refundResult] : []);
 }
 function portal_read_all(array $user): void { run('UPDATE notifications SET is_read=1 WHERE user_id=?', [$user['id']]); portal_fresh($user); }
@@ -383,7 +420,7 @@ function shape_resched(array $r): array {
   ];
 }
 function portal_bookings(int $uid): array {
-  $rows = qa('SELECT * FROM bookings WHERE user_id=? AND hidden_for_customer=0 ORDER BY preferred_date DESC,time DESC,id DESC', [$uid]);
+  $rows = qa('SELECT b.*, pk.name AS package_name, pk.package_code FROM bookings b LEFT JOIN packages pk ON pk.id=b.package_id WHERE b.user_id=? AND b.hidden_for_customer=0 ORDER BY b.preferred_date DESC,b.time DESC,b.id DESC', [$uid]);
   $rs = []; foreach (qa('SELECT * FROM reschedule_requests WHERE user_id=? ORDER BY id', [$uid]) as $r) $rs[(int)$r['booking_id']] = $r;   // the newest request per booking wins
   $rv = []; foreach (qa('SELECT * FROM reviews WHERE user_id=?', [$uid]) as $r) $rv[(int)$r['booking_id']] = $r;
 
@@ -516,7 +553,7 @@ function admin_decide_reschedule(string $rid, array $b): void {
   if (!$bk) fail('Booking not found.', 404);
 
   $admin = admin_actor();
-  $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+  $adminName = admin_display_name();
 
   if ($dec === 'DECLINED') {
     run("UPDATE reschedule_requests SET status='DECLINED',admin_note=?,decided_by=?,decided_at=? WHERE id=?", [$note, $adminName, now(), $r['id']]);
@@ -534,42 +571,7 @@ function admin_decide_reschedule(string $rid, array $b): void {
     run("UPDATE reschedule_requests SET status='APPROVED',admin_note=?,decided_by=?,decided_at=? WHERE id=?",
         [$note, $adminName, now(), $r['id']]);
 
-    // Phase 5: Revalidate assigned room and therapist for the new slot
-    $dur = service_minutes($bk['service'], $bk['duration']) ?: 60;
-    $s = hm_to_min($r['new_time']);
-    $e = $s + $dur;
-    $c = $e + buffer_minutes();
-    $endTime = min_to_hm($e);
-    $cleanEndTime = min_to_hm($c);
-
-    // 1. Revalidate room assignment
-    $roomAsgn = q1("SELECT * FROM appointment_room_assignments WHERE booking_id=? AND status='ASSIGNED'", [$bk['id']]);
-    if ($roomAsgn) {
-      $roomChk = is_room_available((int)$roomAsgn['room_id'], $r['new_date'], $r['new_time'], $dur, (int)$bk['id']);
-      if ($roomChk['ok']) {
-        run("UPDATE appointment_room_assignments SET assigned_date=?, start_time=?, end_time=?, cleaning_end_time=? WHERE id=?",
-            [$r['new_date'], $r['new_time'], $endTime, $cleanEndTime, $roomAsgn['id']]);
-        run("UPDATE room_cleaning SET cleaning_date=?, start_time=?, end_time=? WHERE booking_id=?",
-            [$r['new_date'], $endTime, $cleanEndTime, $bk['id']]);
-      } else {
-        run("UPDATE appointment_room_assignments SET status='RELEASED' WHERE id=?", [$roomAsgn['id']]);
-        run("DELETE FROM room_cleaning WHERE booking_id=?", [$bk['id']]);
-        run("UPDATE bookings SET room_id=NULL WHERE id=?", [$bk['id']]);
-      }
-    }
-
-    // 2. Revalidate therapist assignment
-    $thAsgn = q1("SELECT * FROM appointment_therapist_assignments WHERE booking_id=? AND status='ASSIGNED'", [$bk['id']]);
-    if ($thAsgn) {
-      $thChk = is_therapist_available((int)$thAsgn['therapist_id'], $r['new_date'], $r['new_time'], $dur, $bk['service'], (int)$bk['id']);
-      if ($thChk['ok']) {
-        run("UPDATE appointment_therapist_assignments SET assigned_date=?, start_time=?, end_time=? WHERE id=?",
-            [$r['new_date'], $r['new_time'], $endTime, $thAsgn['id']]);
-      } else {
-        run("UPDATE appointment_therapist_assignments SET status='RELEASED' WHERE id=?", [$thAsgn['id']]);
-        run("UPDATE bookings SET therapist_id=NULL WHERE id=?", [$bk['id']]);
-      }
-    }
+    move_booking_resources($bk, $r['new_date'], $r['new_time']);
   });
   notify($bk['user_id'], 'Your reservation was moved to ' . $r['new_date'] . ' at ' . $r['new_time'] . '.');
   act($bk['user_id'], 'Reschedule approved: ' . $bk['service']);
@@ -588,10 +590,11 @@ function admin_review_visibility(string $rid, array $b): void {
 /* ======================= admin dashboard ======================= */
 function admin_snapshot(): array {
   $content = []; foreach (qa('SELECT content_key,json FROM content') as $r) $content[$r['content_key']] = jparse($r['json'], []);
-  $bksQuery = "SELECT b.*, t.full_name AS therapist_name, t.employee_code AS therapist_code, rm.room_name 
+  $bksQuery = "SELECT b.*, t.full_name AS therapist_name, t.employee_code AS therapist_code, rm.room_name, pk.name AS package_name, pk.package_code 
                FROM bookings b 
                LEFT JOIN therapists t ON t.id = b.therapist_id 
-               LEFT JOIN rooms rm ON rm.room_code = b.room_id";
+               LEFT JOIN rooms rm ON rm.room_code = b.room_id
+               LEFT JOIN packages pk ON pk.id = b.package_id";
 
   $allRooms = get_all_rooms();
   $roomsWithStatus = array_map(function($r) {
@@ -643,16 +646,23 @@ function admin_snapshot(): array {
     'paymentSettings' => get_all_payment_settings()
   ]];
 }
+/* Contact details the admin has not entered yet: the public site still shows the sample defaults from js/data.js for these. */
+function business_info_missing(): array {
+  $have = [];
+  try { foreach (jparse((q1("SELECT json FROM content WHERE content_key='content'")['json'] ?? '[]'), []) as $x) if (is_array($x) && trim((string)($x['text'] ?? '')) !== '') $have[(string)($x['section'] ?? '')] = true; } catch (Throwable $e) {}
+  return array_values(array_filter(['Address', 'Phone', 'Email', 'Opening hours'], fn($s) => empty($have[$s])));
+}
 function security_checks(): array {
   $dbOk = !(cfg('DB_USER') === 'root' && (string)cfg('DB_PASS') === '');
-  $dir = ROOT . '/data'; $writable = is_dir($dir) ? is_writable($dir) : @mkdir($dir, 0775, true);
+  $rlDir = rate_limit_dir(); $writable = $rlDir !== null; $inData = $rlDir !== null && str_starts_with($rlDir, ROOT . '/data');
   return [
     ['id' => 'db', 'ok' => $dbOk, 'title' => 'Database login', 'fix' => $dbOk ? 'The site uses its own database user.' : 'The site connects as root with no password (the XAMPP default). Fine on your own computer. Before going online create a dedicated MySQL user with a strong password and put it in php/config.php.'],
     ['id' => 'prod', 'ok' => prod(), 'title' => 'Production mode', 'fix' => prod() ? 'On: Secure cookies, no debug mail log.' : 'Off (development). Set PRODUCTION to true in php/config.php on a live server.'],
     ['id' => 'https', 'ok' => is_https(), 'title' => 'HTTPS', 'fix' => is_https() ? 'This page is served over HTTPS.' : 'This page is not served over HTTPS. Use HTTPS on a live server.'],
     ['id' => 'smtp', 'ok' => mail_enabled(), 'title' => 'Email (SMTP)', 'fix' => mail_enabled() ? 'Email is configured: verification and password reset work.' : 'SMTP_URL is empty, so accounts are not email-verified and password reset only writes to data/mail.log. Set SMTP_URL before going live.'],
     ['id' => 'tz', 'ok' => cfg('TIMEZONE') && cfg('TIMEZONE') !== 'UTC', 'title' => 'Time zone', 'fix' => (cfg('TIMEZONE') && cfg('TIMEZONE') !== 'UTC') ? 'Booking dates are checked in ' . cfg('TIMEZONE') . '.' : 'TIMEZONE is UTC. Set your local time zone in php/config.php so "today" is correct.'],
-    ['id' => 'ratelimit', 'ok' => $writable, 'title' => 'Login protection', 'fix' => $writable ? 'Rate limiting is active (data/ratelimit is writable).' : 'The data folder is not writable, so login rate limiting is OFF. Make data/ writable.'],
+    ['id' => 'business', 'ok' => !business_info_missing(), 'title' => 'Business details', 'fix' => business_info_missing() ? 'These still show the built-in sample text: ' . implode(', ', business_info_missing()) . '. Enter the real values in Website > Content before showing the site to customers (the demo address, phone and the ".example" email are placeholders).' : 'Address, phone, email and opening hours were entered in the dashboard.'],
+    ['id' => 'ratelimit', 'ok' => $writable, 'title' => 'Login protection', 'fix' => $writable ? ($inData ? 'Rate limiting is active (data/ratelimit is writable).' : 'Rate limiting is active, but data/ratelimit is NOT writable so a temporary folder is used. Make data/ writable.') : 'No rate-limit folder can be written: sign-in, registration and password reset are refused until data/ratelimit is writable (or RATE_LIMIT_FAIL_OPEN is set to true for a local demo).'],
   ];
 }
 function admin_done(array $extra = [], int $code = 200): void { out(['ok' => true] + admin_snapshot() + $extra, $code); }
@@ -684,11 +694,60 @@ function clean_booking(array $b): array {
   elseif (!in_array($d['status'], STATUSES, true)) $e = ['status', 'Choose a valid status.'];
   return [$d, $e];
 }
+/* Keeps the room, cleaning slot and therapist of a booking in step with a new date/time (reschedule approval AND admin edit).
+   A resource that is no longer free at the new time is released instead of double-booked. Call inside the booking's transaction. */
+function move_booking_resources(array $bk, string $newDate, string $newTime, ?string $service = null, $duration = null): void {
+  $dur = service_minutes($service ?? $bk['service'], $duration ?? $bk['duration']) ?: 60;
+  $endTime = min_to_hm(hm_to_min($newTime) + $dur);
+  $cleanEndTime = min_to_hm(hm_to_min($newTime) + $dur + buffer_minutes());
+
+  $roomAsgn = q1("SELECT * FROM appointment_room_assignments WHERE booking_id=? AND status='ASSIGNED'", [$bk['id']]);
+  if ($roomAsgn) {
+    $roomChk = is_room_available((int)$roomAsgn['room_id'], $newDate, $newTime, $dur, (int)$bk['id']);
+    if ($roomChk['ok']) {
+      run("UPDATE appointment_room_assignments SET assigned_date=?, start_time=?, end_time=?, cleaning_end_time=? WHERE id=?", [$newDate, $newTime, $endTime, $cleanEndTime, $roomAsgn['id']]);
+      run("UPDATE room_cleaning SET cleaning_date=?, start_time=?, end_time=? WHERE booking_id=?", [$newDate, $endTime, $cleanEndTime, $bk['id']]);
+    } else {
+      run("UPDATE appointment_room_assignments SET status='RELEASED' WHERE id=?", [$roomAsgn['id']]);
+      run("DELETE FROM room_cleaning WHERE booking_id=?", [$bk['id']]);
+      run("UPDATE bookings SET room_id=NULL WHERE id=?", [$bk['id']]);
+    }
+  }
+  $thAsgn = q1("SELECT * FROM appointment_therapist_assignments WHERE booking_id=? AND status='ASSIGNED'", [$bk['id']]);
+  if ($thAsgn) {
+    $thChk = is_therapist_available((int)$thAsgn['therapist_id'], $newDate, $newTime, $dur, $service ?? $bk['service'], (int)$bk['id']);
+    if ($thChk['ok']) {
+      run("UPDATE appointment_therapist_assignments SET assigned_date=?, start_time=?, end_time=? WHERE id=?", [$newDate, $newTime, $endTime, $thAsgn['id']]);
+    } else {
+      run("UPDATE appointment_therapist_assignments SET status='RELEASED' WHERE id=?", [$thAsgn['id']]);
+      run("UPDATE bookings SET therapist_id=NULL WHERE id=?", [$bk['id']]);
+    }
+  }
+}
+
+/* Reminders: one in-app notification per upcoming booking (next $hours hours, Manila time) for customers who keep the
+   "bookingReminders" preference on. A booking is reminded once (the reference is looked up in the customer's notifications). */
+function send_booking_reminders(int $hours = 24): array {
+  $now = time(); $limit = $now + $hours * 3600; $sent = 0; $skipped = 0;
+  $rows = qa("SELECT b.*, u.prefs FROM bookings b JOIN users u ON u.id = b.user_id WHERE b.status IN ('PENDING','CONFIRMED') AND b.archived = 0 AND b.preferred_date BETWEEN ? AND ?",
+             [gmdate('Y-m-d', $now - 86400), gmdate('Y-m-d', $limit + 86400)]);
+  foreach ($rows as $r) {
+    $ts = appt_ts($r['preferred_date'], $r['time']);
+    if ($ts < $now || $ts > $limit) continue;
+    $prefs = array_merge(PREFS, jparse($r['prefs'], []));
+    $ref = bk_ref($r);
+    if (empty($prefs['bookingReminders']) || q1('SELECT id FROM notifications WHERE user_id=? AND text LIKE ?', [$r['user_id'], 'Reminder:%' . $ref . '%'])) { $skipped++; continue; }
+    notify((int)$r['user_id'], 'Reminder: ' . $r['service'] . ' on ' . $r['preferred_date'] . ' at ' . substr($r['time'], 0, 5) . ' (' . $ref . '). See you at Bella Vista!');
+    $sent++;
+  }
+  return ['sent' => $sent, 'skipped' => $skipped, 'hours' => $hours];
+}
+
 function admin_save_booking(array $b): void {
   [$d, $e] = clean_booking($b); if ($e) fail($e[1], 400, ['field' => $e[0]]);
   $holds = in_array($d['status'], BLOCKING_STATUSES, true) && $d['date'] !== '' && $d['time'] !== '';   // only bookings that hold a slot are checked
   $admin = admin_actor();
-  $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+  $adminName = admin_display_name();
 
   if (!empty($b['id'])) {
     $id = parse_ref($b['id'], 'BK'); $old = $id ? q1('SELECT * FROM bookings WHERE id=?', [$id]) : null;
@@ -704,6 +763,9 @@ function admin_save_booking(array $b): void {
     $write = function () use ($d, $dur, $id, $old, $adminName) {
       run('UPDATE bookings SET name=?,phone=?,email=?,service=?,preferred_date=?,time=?,duration=?,guests=?,amount=? WHERE id=?',
           [$d['name'], $d['phone'], $d['email'], $d['service'], $d['date'], $d['time'], $dur, $d['guests'], $d['amount'], $id]);
+      if ($d['date'] !== '' && $d['time'] !== '' && ($d['date'] !== $old['preferred_date'] || $d['time'] !== $old['time'] || (string)$dur !== (string)$old['duration'] || $d['service'] !== $old['service'])) {
+        move_booking_resources($old, $d['date'], $d['time'], $d['service'], $dur);   // room, cleaning slot and therapist follow the new time
+      }
       if ($d['status'] !== $old['status']) {
         set_status($id, $d['status'], $d['status'] === 'CANCELLED' ? 'Admin status update' : '', $adminName);
         admin_log(admin_actor(), 'Booking status changed', bk_ref($old), $old['status'] . ' -> ' . $d['status']);
@@ -740,7 +802,7 @@ function admin_booking_status(string $ref, array $b): void {
   if ($stErr) fail($stErr, 400);
 
   $admin = admin_actor();
-  $adminName = is_array($admin) ? ($admin['fullName'] ?? 'Admin') : 'Admin';
+  $adminName = admin_display_name();
   $reason = clean_text($b['reason'] ?? '', 200);
 
   // If admin is cancelling within 24h notice window, record administrative override
@@ -807,4 +869,19 @@ function admin_put_content(string $key, array $b): void {
   run('INSERT INTO content(content_key,json) VALUES(?,?) ON DUPLICATE KEY UPDATE json=VALUES(json)', [$key, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
   admin_log(admin_actor(), 'Content saved', $key, count($items) . ' items');
   admin_done();
+}
+
+function admin_team_photo(array $b): void {   // saves a team member photo into assets/images/team/ and returns its path
+  $d = $b['data'] ?? '';
+  if (!is_string($d) || !preg_match('#^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$#', $d, $m)) fail('Choose a JPG, PNG or WebP image.');
+  $bin = base64_decode($m[2], true);
+  $info = $bin === false ? false : @getimagesizefromstring($bin);
+  if (!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true) || $info[0] < 20 || $info[1] < 20 || $info[0] > 2000 || $info[1] > 2000) fail('That file is not a valid image.');
+  $ext = $info[2] === IMAGETYPE_PNG ? 'png' : ($info[2] === IMAGETYPE_WEBP ? 'webp' : 'jpg');
+  $dir = dirname(__DIR__) . '/assets/images/team';
+  if (!is_dir($dir) && !@mkdir($dir, 0755, true)) fail('The photo folder could not be created. Check folder permissions.', 500);
+  $name = 'member-' . bin2hex(random_bytes(6)) . '.' . $ext;
+  if (@file_put_contents($dir . '/' . $name, $bin) === false) fail('The photo could not be saved. Check folder permissions.', 500);
+  admin_log(admin_actor(), 'Team photo uploaded', $name, '');
+  out(['ok' => true, 'path' => 'assets/images/team/' . $name]);
 }

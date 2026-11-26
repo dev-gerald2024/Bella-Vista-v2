@@ -11,7 +11,8 @@ const MIN_PW = 8;
 const MAX_PW = 256;
 
 /* ---------- config ---------- */
-function cfg(string $k) { static $c = null; $c ??= require __DIR__ . '/config.php'; return $c[$k] ?? null; }
+function cfg(string $k) { static $c = null; $c ??= require __DIR__ . '/config.php'; return $GLOBALS['__bv_cfg_test'][$k] ?? $c[$k] ?? null; }   // the override exists only for tests/ (set when TEST_RUNNER is defined)
+function cfg_test_override(string $k, $v): void { if (defined('TEST_RUNNER') && TEST_RUNNER) $GLOBALS['__bv_cfg_test'][$k] = $v; }
 function test_passwords(): array {
   $passwords = cfg('TEST_PASSWORDS');
   if (!is_array($passwords)) return [];
@@ -44,12 +45,39 @@ function db(): PDO {
   $p = new PDO($dsn, cfg('DB_USER'), cfg('DB_PASS'), [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]);
   $p->exec("SET time_zone='+00:00'");
+  register_shutdown_function(function () use ($p) { if ($p->inTransaction()) { try { $p->rollBack(); } catch (Throwable $e) {} } });   // fail() exits: never leave a half-finished transaction
   return $p;
 }
 function run(string $sql, array $a = []): PDOStatement { $s = db()->prepare($sql); $s->execute($a); return $s; }
 function q1(string $sql, array $a = []): ?array { $r = run($sql, $a)->fetch(); return $r ?: null; }
 function qa(string $sql, array $a = []): array { return run($sql, $a)->fetchAll(); }
 function last_id(): int { return (int)db()->lastInsertId(); }
+/* Unix time of an appointment, read as Asia/Manila (the spa's timezone) whatever timezone PHP itself runs in */
+function appt_ts(string $date, string $time): int {
+  $d = DateTime::createFromFormat('Y-m-d H:i', $date . ' ' . substr($time, 0, 5), new DateTimeZone(cfg('TIMEZONE') ?: 'UTC'));
+  return $d ? $d->getTimestamp() : 0;
+}
+/* Run $fn inside one database transaction (all-or-nothing). Joins an outer transaction when there is one.
+   If the request ends early (fail() exits), the open transaction is rolled back. */
+function tx(callable $fn) {
+  $pdo = db();
+  if ($pdo->inTransaction()) return $fn();
+  $pdo->beginTransaction();
+  try { $r = $fn(); $pdo->commit(); return $r; }
+  catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
+}
+/* Per-booking lock: two requests touching the same booking (double-click on Pay, two admins refunding) run one after the other.
+   Held until the returned object goes out of scope; released automatically when the connection closes. */
+final class BookingLock {
+  public function __construct(private string $name) {}
+  public function __destruct() { try { q1('SELECT RELEASE_LOCK(?) AS r', [$this->name]); } catch (Throwable $e) {} }
+}
+function booking_lock(int $bookingId, int $waitSeconds = 10): BookingLock {
+  $name = 'bv_' . substr(sha(cfg('DB_NAME') . ':b:' . $bookingId), 0, 40);
+  $r = q1('SELECT GET_LOCK(?, ?) AS l', [$name, $waitSeconds]);
+  if (!$r || (int)$r['l'] !== 1) fail('This reservation is being updated by another request. Please try again in a moment.', 409);
+  return new BookingLock($name);
+}
 function now(): string { return gmdate('Y-m-d H:i:s'); }          // stored as UTC DATETIME
 function ms(): int { return (int)floor(microtime(true) * 1000); }
 function iso(?string $dt): string { return $dt ? str_replace(' ', 'T', $dt) . 'Z' : ''; }   // what the browser receives
@@ -220,18 +248,32 @@ function pw_verify(string $p, string $hash): bool {
 }
 
 /* ---------- rate limiting (file based: PHP has no shared memory between requests) ---------- */
+/* Where the rate-limit counters live: RATE_LIMIT_DIR when set (only that), otherwise data/ratelimit, otherwise a folder in the system temp dir. */
+function rate_limit_dir(): ?string {
+  $custom = (string)cfg('RATE_LIMIT_DIR');
+  $cands = $custom !== '' ? [$custom] : [ROOT . '/data/ratelimit', rtrim(sys_get_temp_dir(), '/\\') . '/bellavista-ratelimit-' . substr(sha1(ROOT), 0, 10)];
+  foreach ($cands as $d) { if (!is_dir($d)) @mkdir($d, 0775, true); if (is_dir($d) && is_writable($d)) return $d; }
+  return null;
+}
+/* Limits that protect accounts must never silently switch off. If no counter folder can be written they refuse the request with a
+   clear 503 (set RATE_LIMIT_FAIL_OPEN to true in config.local.php to allow it knowingly, for local testing). The other limits only log. */
+const RATE_LIMIT_CRITICAL = ['reg', 'login', 'login-ip', 'resend', 'forgot', 'reset', 'pw'];
 function rate_limit(string $name, int $max, int $windowMs, array $body = [], bool $byEmail = true, ?string $userKey = null): void {
   $key = $name . '|' . ($userKey !== null ? 'user:' . $userKey : client_ip() . '|' . ($byEmail ? strtolower(str($body['email'] ?? '')) : ''));
-  $dir = ROOT . '/data/ratelimit';
-  if (!is_dir($dir)) @mkdir($dir, 0775, true);
-  $fh = @fopen($dir . '/' . sha1($key) . '.json', 'c+'); if (!$fh) { error_log('Bella Vista: data/ratelimit is not writable, rate limiting is OFF'); return; }   // never block customers, but make the problem visible
+  $dir = rate_limit_dir();
+  $fh = $dir ? @fopen($dir . '/' . sha1($key) . '.json', 'c+') : false;
+  if (!$fh) {
+    error_log('[bellavista] SECURITY: the rate-limit folder is not writable (data/ratelimit); limit "' . $name . '" cannot be enforced');
+    if (in_array($name, RATE_LIMIT_CRITICAL, true) && !cfg('RATE_LIMIT_FAIL_OPEN')) fail('Sign-in protection is temporarily unavailable on this server. Please tell the spa administrator (the folder data/ratelimit must be writable).', 503, ['code' => 'rate_limit_unavailable']);
+    return;
+  }
   flock($fh, LOCK_EX);
   $h = json_decode(stream_get_contents($fh), true); $t = ms();
   if (!is_array($h) || ($h['reset'] ?? 0) < $t) $h = ['n' => 0, 'reset' => $t + $windowMs];
   $h['n']++;
   ftruncate($fh, 0); rewind($fh); fwrite($fh, json_encode($h)); fflush($fh); flock($fh, LOCK_UN); fclose($fh);
   if (random_int(1, 50) === 1) foreach (glob($dir . '/*.json') ?: [] as $f) if (@filemtime($f) < time() - 86400) @unlink($f);
-  if ($h['n'] > $max) { header('Retry-After: ' . (int)ceil(($h['reset'] - $t) / 1000)); fail('Too many attempts. Please try again later.', 429); }
+  if ($h['n'] > $max) { if (!headers_sent()) header('Retry-After: ' . (int)ceil(($h['reset'] - $t) / 1000)); fail('Too many attempts. Please try again later.', 429); }
 }
 
 /* ---------- sessions ---------- */
@@ -244,42 +286,49 @@ function start_session(int $uid, bool $admin = false): void {
   set_session_cookie($t, intdiv($len, 1000));
 }
 function mail_enabled(): bool { return (string)cfg('SMTP_URL') !== ''; }
+/* Offline use: with no email server the reset link is shown on the "Forgot password" page itself (no need to open data/mail.log).
+   Never on a production site and never when real email is set up: showing the link to whoever types an address would let
+   anyone reset any account. Switch it off with OFFLINE_RESET_ON_SCREEN => false. */
+function offline_reset_shown(): bool { return !prod() && !mail_enabled() && (bool)cfg('OFFLINE_RESET_ON_SCREEN'); }
 function mail_dev_log(): bool { return !mail_enabled() && cfg('DEV_MAIL_TO_LOG') && !prod(); }
 function admin_ok(): bool { return mail_enabled() || !prod(); }
 function is_admin_row(array $u): bool { return admin_ok() && (bool)$u['email_verified'] && ($u['role'] ?? '') === 'ADMIN'; }   // the role lives in the database, never in a config file
 function current_user(): ?array {
   $sid = $_COOKIE[cookie_name()] ?? '';
   if (!is_string($sid) || !preg_match('/^[a-f0-9]{64}$/D', $sid)) return null;
-  $r = q1('SELECT u.id,u.full_name,u.email,u.email_verified,u.role,u.active,s.created_at AS s_created,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?', [sha($sid)]);
+  $r = q1('SELECT u.id,u.full_name,u.email,u.email_verified,u.phone,u.role,u.active,s.created_at AS s_created,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?', [sha($sid)]);
   if (!$r) return null;
   if (!(int)$r['active']) { run('DELETE FROM sessions WHERE token_hash=?', [sha($sid)]); return null; }   // deactivated accounts are signed out
   if ($r['role'] === 'ADMIN' && ms() - (int)$r['s_created'] > ADMIN_SESSION_MS) { run('DELETE FROM sessions WHERE token_hash=?', [sha($sid)]); return null; }   // an older long session of an account that became admin
   if ((int)$r['expires_at'] <= ms()) { run('DELETE FROM sessions WHERE token_hash=?', [sha($sid)]); return null; }
-  return ['id' => (int)$r['id'], 'fullName' => $r['full_name'], 'email' => $r['email'], 'emailVerified' => (bool)$r['email_verified'], 'role' => $r['role'],
+  return ['id' => (int)$r['id'], 'fullName' => $r['full_name'], 'email' => $r['email'], 'emailVerified' => (bool)$r['email_verified'], 'phone' => (string)($r['phone'] ?? ''), 'role' => $r['role'],
           'isAdmin' => is_admin_row($r)];
 }
-function public_user(?array $u): ?array { return $u ? ['fullName' => $u['fullName'], 'email' => $u['email'], 'emailVerified' => $u['emailVerified'], 'role' => $u['role'], 'isAdmin' => !empty($u['isAdmin'])] : null; }
+function public_user(?array $u): ?array { return $u ? ['fullName' => $u['fullName'], 'email' => $u['email'], 'emailVerified' => $u['emailVerified'], 'phone' => $u['phone'] ?? '', 'role' => $u['role'], 'isAdmin' => !empty($u['isAdmin'])] : null; }
 function admin_log(?int $adminId, string $action, string $target = '', string $detail = '', string $name = ''): void {
   $n = $adminId ? q1('SELECT full_name FROM users WHERE id=?', [$adminId]) : null;
   run('INSERT INTO admin_log(admin_id,admin_name,action,target,detail,created_at) VALUES(?,?,?,?,?,?)', [$adminId, $n ? $n['full_name'] : mb_substr($name, 0, 100), mb_substr($action, 0, 60), mb_substr($target, 0, 60), mb_substr($detail, 0, 500), now()]);
 }
 function admin_actor(?array $set = null): ?int { static $id = null; if ($set) $id = (int)$set['id']; return $id; }
+/* Name of the signed-in admin for log lines (admin_actor() is only an id). */
+function admin_display_name(): string { $id = admin_actor(); $r = $id ? q1('SELECT full_name FROM users WHERE id=?', [$id]) : null; return ($r['full_name'] ?? '') ?: 'Admin'; }
 function purge_expired(): void {   // replaces the Node server's hourly timer
   if (random_int(1, 100) !== 1) return;
   run('DELETE FROM sessions WHERE expires_at<?', [ms()]); run('DELETE FROM tokens WHERE expires_at<?', [ms()]);
 }
 
 /* ---------- one-time tokens (email verification / password reset) ---------- */
-function send_token(int $uid, string $email, string $name, string $purpose): void {
+function send_token(int $uid, string $email, string $name, string $purpose): string {   // returns the link (also mailed / logged when mail is available)
   run('DELETE FROM tokens WHERE user_id=? AND purpose=?', [$uid, $purpose]);
   $t = rnd();
   run('INSERT INTO tokens(token_hash,user_id,purpose,expires_at) VALUES(?,?,?,?)', [sha($t), $uid, $purpose, ms() + ($purpose === 'verify' ? 24 : 1) * 3600000]);
   $url = base_url() . '/' . ($purpose === 'verify' ? 'verify' : 'reset') . '.html#token=' . $t;   // fragment: never sent to servers/referrers
-  send_mail($email,
+  if (mail_enabled() || mail_dev_log()) send_mail($email,
     $purpose === 'verify' ? 'Verify your Bella Vista Oasis Spa account' : 'Reset your Bella Vista Oasis Spa password',
     $purpose === 'verify'
       ? "Hello $name,\n\nPlease confirm your email address to finish setting up your account:\n$url\n\nThis link expires in 24 hours. If you did not create an account, you can ignore this message."
       : "Hello $name,\n\nUse this link to choose a new password:\n$url\n\nThis link expires in 1 hour. If you did not request this, you can ignore this message.");
+  return $url;
 }
 function take_token($raw, string $purpose): ?int {
   if (!is_string($raw) || !preg_match('/^[a-f0-9]{64}$/D', $raw)) return null;
@@ -383,12 +432,25 @@ function content_check(string $key, array $items): ?string {   // null = fine, o
     if ($key === 'faqs') {
       if ($g('q') === '' || $g('a') === '') return 'Every FAQ needs a question and an answer.';
       if (mb_strlen($g('q')) > 200 || mb_strlen($g('a')) > 2000) return 'A FAQ is too long (question up to 200 characters, answer up to 2000).';
+    } elseif ($key === 'services') {
+      if ($g('name') === '' || mb_strlen($g('name')) > 100) return 'Enter a name for the service (100 characters at most).';
+      if ($g('durations') !== '' || $g('prices') !== '') {
+        if (!parse_service_options($g('durations'), $g('prices'))) return 'For "' . $g('name') . '" enter durations and prices as matching lists, for example durations "60, 90" and prices "800, 1100" (15-480 minutes, up to 6 options, each with a price above 0).';
+      }
+      if ($g('active') !== '' && !in_array(strtolower($g('active')), ['yes', 'no'], true)) return 'Available for booking must be Yes or No.';
     } elseif ($key === 'wellness') {
       if ($g('name') === '' || mb_strlen($g('name')) > 100) return 'Enter a name for the wellness item (100 characters at most).';
       if (mb_strlen($g('desc')) > 1000 || mb_strlen($g('category')) > 60) return 'The description (1000) or category (60) is too long.';
     } elseif ($key === 'gallery') {
       if (!image_path_ok($g('path'))) return 'The image path must start with assets/ and end in .jpg, .png, .webp or .gif, for example assets/images/spa.jpg.';
       if (mb_strlen($g('title')) > 100) return 'The image title is too long (100 characters at most).';
+    } elseif ($key === 'team') {
+      if ($g('name') === '' || mb_strlen($g('name')) > 100) return 'Enter the member\'s name (100 characters at most).';
+      if (mb_strlen($g('role')) > 100 || mb_strlen($g('bio')) > 500) return 'The role (100 characters) or bio (500 characters) is too long.';
+      if ($g('photo') !== '' && !image_path_ok($g('photo'))) return 'The photo path must start with assets/ and end in .jpg, .png, .webp or .gif, for example assets/images/team/juan.jpg.';
+      if ($g('email') !== '' && !preg_match('/^[^\s"\'<>@]+@[^\s"\'<>@]+\.[^\s"\'<>@]+$/', $g('email'))) return 'Enter a valid email address for the team member.';
+      foreach (['github' => 'GitHub', 'linkedin' => 'LinkedIn'] as $f => $lbl)
+        if ($g($f) !== '' && !preg_match('#^https://[^\s"\'<>]{3,190}$#i', $g($f))) return $lbl . ' link must start with https://';
     } elseif ($key === 'content') {
       $sec = $g('section'); $t = $g('text');
       if (!in_array($sec, CONTENT_SECTIONS, true)) return 'Choose one of the listed sections.';
@@ -400,22 +462,29 @@ function content_check(string $key, array $items): ?string {   // null = fine, o
   return null;
 }
 function content_overlay(): array {   // clean, size-limited copy of what the admin saved; safe to send to any visitor
-  $out = ['services' => [], 'rooms' => [], 'wellness' => [], 'faqs' => [], 'gallery' => [], 'content' => []];
+  $out = ['services' => [], 'rooms' => [], 'wellness' => [], 'faqs' => [], 'gallery' => [], 'team' => [], 'content' => []];
   try {
     foreach (array_keys($out) as $k) {
       $r = q1('SELECT json FROM content WHERE content_key=?', [$k]);
       $rows = jparse($r['json'] ?? '[]', []);
-      if (in_array($k, ['wellness', 'faqs', 'gallery'], true)) $rows = array_reverse($rows);   // admin lists newest first; visitors see them in the order added
+      if (in_array($k, ['wellness', 'faqs', 'gallery', 'team'], true)) $rows = array_reverse($rows);   // admin lists newest first; visitors see them in the order added
       foreach ($rows as $x) {
         if (!is_array($x)) continue;
         $t = fn($f, $n) => is_string($x[$f] ?? null) ? mb_substr(trim($x[$f]), 0, $n) : '';
         if ($k === 'services' || $k === 'rooms' || $k === 'wellness') {
           $n = $t('name', 100); if ($n === '') continue;
           if ($k === 'wellness' && content_check($k, [$x]) !== null) continue;
-          $out[$k][] = ['name' => $n, 'cat' => $t('category', 60), 'desc' => is_string($x['desc'] ?? null) ? mb_substr($x['desc'], 0, 1000) : ''];
+          $row = ['name' => $n, 'cat' => $t('category', 60), 'desc' => is_string($x['desc'] ?? null) ? mb_substr($x['desc'], 0, 1000) : ''];
+          if ($k === 'services') {   // booking rules the public booking form needs (the server re-checks them on every booking)
+            $po = parse_service_options($t('durations', 80), $t('prices', 120));
+            if ($po) { $row['durations'] = $po[0]; $row['prices'] = $po[1]; }
+            $row['active'] = strtolower($t('active', 5)) !== 'no';
+          }
+          $out[$k][] = $row;
         } elseif (content_check($k, [$x]) === null) {
           if ($k === 'faqs') $out[$k][] = ['q' => $t('q', 200), 'a' => $t('a', 2000)];
           elseif ($k === 'gallery') $out[$k][] = ['title' => $t('title', 100), 'path' => $t('path', 200)];
+          elseif ($k === 'team') $out[$k][] = ['name' => $t('name', 100), 'role' => $t('role', 100), 'bio' => $t('bio', 500), 'photo' => $t('photo', 200), 'email' => $t('email', 120), 'github' => $t('github', 200), 'linkedin' => $t('linkedin', 200)];
           else $out[$k][] = ['section' => $t('section', 60), 'text' => $t('text', 1000)];
         }
       }
@@ -423,3 +492,6 @@ function content_overlay(): array {   // clean, size-limited copy of what the ad
   } catch (Throwable $e) { /* database unavailable: fall back to js/data.js only */ }
   return $out;
 }
+
+/* old records may carry a legacy -DEMO- tag in their reference numbers; never show it */
+function clean_ref($v) { return is_string($v) ? str_replace(['-DEMO-', 'DEMO-'], ['-', ''], $v) : $v; }
